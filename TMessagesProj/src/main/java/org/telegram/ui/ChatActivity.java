@@ -16,6 +16,7 @@ import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
+import org.telegram.ui.Components.VerticalStackDrawable;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
@@ -410,6 +411,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private HintView2 groupEmojiPackHint;
     private HintView2 botMessageHint;
     private HintView2 factCheckHint;
+    private HintView2 startBotHint;
 
     private int reactionsMentionCount;
     private FrameLayout reactionsMentiondownButton;
@@ -8057,6 +8059,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 }
                 botUser = null;
                 updateBottomOverlay();
+                hideBotStartHint();
             } else {
                 if (ChatObject.isChannel(currentChat) && !(currentChat instanceof TLRPC.TL_channelForbidden)) {
                     if (ChatObject.isNotInChat(currentChat)) {
@@ -19973,6 +19976,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                         chatActivityEnterView.setVisibility(View.VISIBLE);
                     }
                     chatActivityEnterView.setBotInfo(botInfo);
+                    hideBotStartHint();
                 }
             }
 
@@ -24858,6 +24862,46 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         }
     }
 
+    private void checkBotStartHint() {
+        if (startBotHint == null) {
+            startBotHint = new HintView2(getContext(), HintView2.DIRECTION_BOTTOM);
+            startBotHint.setCloseButton(false);
+            VerticalStackDrawable icon = new VerticalStackDrawable(getContext());
+            icon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_gifSaveHintText), PorterDuff.Mode.MULTIPLY));
+            icon.setSize(dp(20), dp(20));
+            startBotHint.setIcon(icon);
+            startBotHint.setMultilineText(false);
+            startBotHint.setTextAlign(Layout.Alignment.ALIGN_CENTER);
+            startBotHint.setRounding(12);
+            startBotHint.setTextTypeface(AndroidUtilities.bold());
+            startBotHint.setTextSize(16);
+            startBotHint.setBgColor(getThemedColor(Theme.key_chat_gifSaveHintBackground));
+            startBotHint.setTextColor(getThemedColor(Theme.key_chat_gifSaveHintText));
+            startBotHint.setText(LocaleController.getString(R.string.BotStartButtonTooltipHint));
+//            startBotHint.setMaxWidthPx(HintView2.cutInFancyHalf(startBotHint.getText(), startBotHint.getTextPaint()));
+            startBotHint.setDuration(-1);
+            startBotHint.setInnerPadding(16, 11, 16, 11);
+            startBotHint.setIconTranslate(dp(4), dp(1));
+
+            contentView.post(() -> {
+                if (startBotHint == null) {
+                    return;
+                }
+                FrameLayout.LayoutParams lp = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL, 16, 0, 16, 0);
+                lp.bottomMargin = bottomOverlayChat.getMeasuredHeight() + AndroidUtilities.dp(6);
+                contentView.addView(startBotHint, lp);
+                startBotHint.show();
+            });
+        }
+    }
+
+    private void hideBotStartHint() {
+        if (startBotHint != null) {
+            startBotHint.hide();
+            startBotHint = null;
+        }
+    }
+
     public boolean groupEmojiPackHintWasVisible() {
         boolean result = false;
         if (groupEmojiPackHint != null) {
@@ -25216,6 +25260,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                 if (!messages.isEmpty() && currentUser != null && botUser.length() != 0) {
                     sentBotStart = true;
                 }
+
+                checkBotStartHint();
             } else {
                 bottomOverlayChatText.setText(LocaleController.getString(R.string.DeleteThisChat));
             }
@@ -25361,6 +25407,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             if (isInsideContainer || forceNoBottom) {
                 bottomOverlayChat.setVisibility(View.GONE);
                 chatActivityEnterView.setVisibility(View.GONE);
+                hideBotStartHint();
             } else if (isReport()) {
                 bottomOverlayChat.setVisibility(View.VISIBLE);
                 chatActivityEnterView.setVisibility(View.INVISIBLE);
@@ -25408,6 +25455,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         }
         if (sentBotStart) {
             bottomOverlayChat.setVisibility(View.GONE);
+            hideBotStartHint();
             chatActivityEnterView.setVisibility(View.VISIBLE);
             chatActivityEnterView.setBotInfo(botInfo);
         }
@@ -38093,6 +38141,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         themeDescriptions.add(new ThemeDescription(gifHintTextView, ThemeDescription.FLAG_BACKGROUNDFILTER, null, null, null, null, Theme.key_chat_gifSaveHintBackground));
         themeDescriptions.add(new ThemeDescription(gifHintTextView, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_chat_gifSaveHintText));
 
+
+        themeDescriptions.add(new ThemeDescription(startBotHint, ThemeDescription.FLAG_BACKGROUNDFILTER, null, null, null, null, Theme.key_chat_gifSaveHintBackground));
+        themeDescriptions.add(new ThemeDescription(startBotHint, ThemeDescription.FLAG_TEXTCOLOR, null, null, null, null, Theme.key_chat_gifSaveHintText));
 
         themeDescriptions.add(new ThemeDescription(noSoundHintView, ThemeDescription.FLAG_TEXTCOLOR, new Class[]{HintView.class}, new String[]{"textView"}, null, null, null, Theme.key_chat_gifSaveHintText));
         themeDescriptions.add(new ThemeDescription(noSoundHintView, ThemeDescription.FLAG_IMAGECOLOR, new Class[]{HintView.class}, new String[]{"imageView"}, null, null, null, Theme.key_chat_gifSaveHintText));
