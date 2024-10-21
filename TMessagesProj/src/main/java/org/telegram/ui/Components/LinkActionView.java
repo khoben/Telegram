@@ -59,6 +59,7 @@ public class LinkActionView extends LinearLayout {
     String link;
     BaseFragment fragment;
     ImageView optionsView;
+    ImageView qrShareButton;
     private final TextView copyView;
     private final TextView shareView;
     private final TextView removeView;
@@ -78,6 +79,7 @@ public class LinkActionView extends LinearLayout {
     private boolean canEdit = true;
     private final boolean isChannel;
     private final float[] point = new float[2];
+    private boolean showQrCodeButtonOnly;
 
     public LinkActionView(Context context, BaseFragment fragment, BottomSheet bottomSheet, long chatId, boolean permanent, boolean isChannel) {
         super(context);
@@ -95,11 +97,19 @@ public class LinkActionView extends LinearLayout {
 
         int containerPadding = 4;
         frameLayout.addView(linkView);
+
         optionsView = new ImageView(context);
         optionsView.setImageDrawable(ContextCompat.getDrawable(context, R.drawable.ic_ab_other));
         optionsView.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
         optionsView.setScaleType(ImageView.ScaleType.CENTER);
+
+        qrShareButton = new ImageView(context);
+        qrShareButton.setImageDrawable(ContextCompat.getDrawable(context, R.drawable.msg_qrcode));
+        qrShareButton.setContentDescription(LocaleController.getString(R.string.GetQRCode));
+        qrShareButton.setScaleType(ImageView.ScaleType.CENTER);
+
         frameLayout.addView(optionsView, LayoutHelper.createFrame(40, 48, Gravity.RIGHT | Gravity.CENTER_VERTICAL));
+        frameLayout.addView(qrShareButton, LayoutHelper.createFrame(48, 48, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 2, 0));
         addView(frameLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, containerPadding, 0, containerPadding, 0));
 
         LinearLayout linearLayout = new LinearLayout(context);
@@ -217,6 +227,8 @@ public class LinkActionView extends LinearLayout {
             builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
             fragment.showDialog(builder.create());
         });
+
+        qrShareButton.setOnClickListener(view -> showQrCode());
 
         optionsView.setOnClickListener(view -> {
             if (actionBarPopupWindow != null) {
@@ -350,6 +362,7 @@ public class LinkActionView extends LinearLayout {
             }
         });
         updateColors();
+        updateOptionsState();
     }
 
     public void showBulletin(int resId, CharSequence str) {
@@ -412,7 +425,9 @@ public class LinkActionView extends LinearLayout {
         frameLayout.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(8), Theme.getColor(Theme.key_graySection), ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_listSelector), (int) (255 * 0.3f))));
         linkView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         optionsView.setColorFilter(Theme.getColor(Theme.key_dialogTextGray3));
-        //optionsView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 1));
+        qrShareButton.setColorFilter(Theme.getColor(Theme.key_dialogTextGray3));
+//        optionsView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 1));
+        qrShareButton.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), 1));
         avatarsContainer.countTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText));
         avatarsContainer.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(6), 0, ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText), (int) (255 * 0.3f))));
 
@@ -437,11 +452,12 @@ public class LinkActionView extends LinearLayout {
         this.revoked = revoked;
         if (revoked) {
             optionsView.setVisibility(View.GONE);
+            qrShareButton.setVisibility(View.GONE);
             shareView.setVisibility(View.GONE);
             copyView.setVisibility(View.GONE);
             removeView.setVisibility(View.VISIBLE);
         } else {
-            optionsView.setVisibility(View.VISIBLE);
+            updateOptionsState();
             shareView.setVisibility(View.VISIBLE);
             copyView.setVisibility(View.VISIBLE);
             removeView.setVisibility(View.GONE);
@@ -449,19 +465,28 @@ public class LinkActionView extends LinearLayout {
     }
 
     public void showOptions(boolean b) {
-        optionsView.setVisibility(b ? View.VISIBLE : View.GONE);
+        if (b) {
+            updateOptionsState();
+        } else {
+            optionsView.setVisibility(View.GONE);
+            qrShareButton.setVisibility(View.GONE);
+        }
     }
 
     public void hideRevokeOption(boolean b) {
         if (hideRevokeOption != b) {
             hideRevokeOption = b;
-            optionsView.setVisibility(View.VISIBLE);
             optionsView.setImageDrawable(ContextCompat.getDrawable(optionsView.getContext(), R.drawable.ic_ab_other));
+            qrShareButton.setImageDrawable(ContextCompat.getDrawable(qrShareButton.getContext(), R.drawable.msg_qrcode));
+            optionsView.setVisibility(View.VISIBLE);
+            qrShareButton.setVisibility(View.VISIBLE);
+            updateOptionsState();
         }
     }
 
     public void hideOptions() {
         optionsView.setVisibility(View.GONE);
+        qrShareButton.setVisibility(View.GONE);
         linkView.setGravity(Gravity.CENTER);
         removeView.setVisibility(View.GONE);
         avatarsContainer.setVisibility(View.GONE);
@@ -612,9 +637,17 @@ public class LinkActionView extends LinearLayout {
 
     public void setPermanent(boolean permanent) {
         this.permanent = permanent;
+        updateOptionsState();
     }
 
     public void setCanEdit(boolean canEdit) {
         this.canEdit = canEdit;
+        updateOptionsState();
+    }
+
+    private void updateOptionsState() {
+        this.showQrCodeButtonOnly = (this.permanent || !canEdit) && hideRevokeOption;
+        qrShareButton.setVisibility(this.showQrCodeButtonOnly ? View.VISIBLE : View.GONE);
+        optionsView.setVisibility(this.showQrCodeButtonOnly ? View.GONE : View.VISIBLE);
     }
 }
