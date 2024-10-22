@@ -24897,6 +24897,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
     private void hideBotStartHint() {
         if (startBotHint != null) {
+            HintView2 hint = startBotHint;
+            hint.setOnHiddenListener(() -> contentView.removeView(hint));
             startBotHint.hide();
             startBotHint = null;
         }
