@@ -1,23 +1,28 @@
 package org.telegram.ui.Components;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.drawable.Drawable;
-
-import org.telegram.messenger.R;
+import android.view.animation.AccelerateDecelerateInterpolator;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 
-public class VerticalStackDrawable extends Drawable implements Drawable.Callback {
+import org.telegram.messenger.R;
 
-    private Drawable icon;
+public class DoubleArrowDownDrawable extends Drawable implements Drawable.Callback {
+
+    private final Drawable icon;
     private int h;
     private int w;
 
-    public VerticalStackDrawable(Context context) {
+    private ValueAnimator valueAnimator;
+    private float animatedTranslationY;
+
+    public DoubleArrowDownDrawable(Context context) {
         icon = ContextCompat.getDrawable(context, R.drawable.msg_go_down);
         assert icon != null;
         w = icon.getIntrinsicWidth();
@@ -28,6 +33,30 @@ public class VerticalStackDrawable extends Drawable implements Drawable.Callback
     public void setSize(int w, int h) {
         this.w = w;
         this.h = h;
+    }
+
+    public void start() {
+        stop();
+
+        valueAnimator = ValueAnimator.ofFloat(-.08f, .08f);
+        valueAnimator.addUpdateListener(a -> {
+            animatedTranslationY = (float) a.getAnimatedValue();
+            invalidateSelf();
+        });
+        valueAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        valueAnimator.setRepeatMode(ValueAnimator.REVERSE);
+        valueAnimator.setDuration(400L);
+        valueAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
+        valueAnimator.start();
+    }
+
+    public void stop() {
+        if (valueAnimator != null) {
+            valueAnimator.removeAllUpdateListeners();
+            valueAnimator.cancel();
+        }
+        valueAnimator = null;
+        animatedTranslationY = 0;
     }
 
     @Override
@@ -59,6 +88,7 @@ public class VerticalStackDrawable extends Drawable implements Drawable.Callback
     @Override
     public void draw(@NonNull Canvas canvas) {
         canvas.save();
+        canvas.translate(0, getIntrinsicHeight() * animatedTranslationY);
         canvas.translate(0, -getIntrinsicHeight() / 6f);
         icon.draw(canvas);
         canvas.translate(0, 2 * getIntrinsicHeight() / 6f);

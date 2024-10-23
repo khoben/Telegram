@@ -16,7 +16,7 @@ import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
-import org.telegram.ui.Components.VerticalStackDrawable;
+import org.telegram.ui.Components.DoubleArrowDownDrawable;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
@@ -77,7 +77,6 @@ import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ImageSpan;
 import android.text.style.URLSpan;
-import android.util.Log;
 import android.util.Pair;
 import android.util.Property;
 import android.util.SparseArray;
@@ -266,7 +265,6 @@ import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.IDN;
 import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -412,6 +410,7 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private HintView2 botMessageHint;
     private HintView2 factCheckHint;
     private HintView2 startBotHint;
+    private DoubleArrowDownDrawable startBotHintIcon;
 
     private int reactionsMentionCount;
     private FrameLayout reactionsMentiondownButton;
@@ -24866,10 +24865,11 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         if (startBotHint == null) {
             startBotHint = new HintView2(getContext(), HintView2.DIRECTION_BOTTOM);
             startBotHint.setCloseButton(false);
-            VerticalStackDrawable icon = new VerticalStackDrawable(getContext());
-            icon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_gifSaveHintText), PorterDuff.Mode.MULTIPLY));
-            icon.setSize(dp(20), dp(20));
-            startBotHint.setIcon(icon);
+            startBotHintIcon = new DoubleArrowDownDrawable(getContext());
+            startBotHintIcon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_gifSaveHintText), PorterDuff.Mode.MULTIPLY));
+            startBotHintIcon.setSize(dp(20), dp(20));
+            startBotHint.setIcon(startBotHintIcon);
+            startBotHintIcon.start();
             startBotHint.setMultilineText(false);
             startBotHint.setTextAlign(Layout.Alignment.ALIGN_CENTER);
             startBotHint.setRounding(12);
@@ -24896,6 +24896,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     }
 
     private void hideBotStartHint() {
+        if (startBotHintIcon != null) {
+            startBotHintIcon.stop();
+            startBotHintIcon = null;
+        }
         if (startBotHint != null) {
             HintView2 hint = startBotHint;
             hint.setOnHiddenListener(() -> contentView.removeView(hint));
