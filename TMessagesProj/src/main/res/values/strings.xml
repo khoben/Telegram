@@ -8180,8 +8180,11 @@
     <string name="Gift2ButtonSell_one">sell for %d Star</string>
     <string name="Gift2ButtonSell_other">sell for %d Stars</string>
     <string name="BotStartButtonTooltipHint">Tap here to use this bot</string>
-    <string name="VoipChannelScheduledVoiceChatNotifyMe">Notify Me</string>
-    <string name="VoipChannelScheduledVoiceChatWillBeNotified">You will be notified when the live stream starts.</string>
-    <string name="VoipScheduledGroupOffline">You\'re currently offline. Please connect to the Internet to schedule this stream.</string>
-    <string name="VoipScheduledGroupOfflineAirplane">You currently have airplane mode enabled. Please turn it off or connect to Wi-Fi to schedule this stream.</string>
+    <string name="VoipScheduledNotifyMe">Notify Me</string>
+    <string name="VoipChannelScheduledWillBeNotified">You will be notified when the live stream starts.</string>
+    <string name="VoipGroupScheduledWillBeNotified">You will be notified when the video chat starts.</string>
+    <string name="VoipChannelScheduledOffline">You\'re currently offline. Please connect to the Internet to enable notification when this stream is started.</string>
+    <string name="VoipChannelScheduledOfflineAirplane">You currently have airplane mode enabled. Please turn it off or connect to Wi-Fi to enable notification when this stream is started.</string>
+    <string name="VoipGroupScheduledOffline">You\'re currently offline. Please connect to the Internet to enable notification when this video chat is started.</string>
+    <string name="VoipGroupScheduledOfflineAirplane">You currently have airplane mode enabled. Please turn it off or connect to Wi-Fi to enable notification when this video chat is started.</string>
 </resources>

@@ -137,9 +137,9 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     private int joinButtonWidth;
     private CellFlickerDrawable joinButtonFlicker;
 
-    private FrameLayout notifyScheduledStreamSelector;
-    private boolean shouldShowScheduledStreamNotifyButton;
-    private int notifyScheduledStreamReqId = -1;
+    private FrameLayout notifyScheduledCallSelector;
+    private boolean shouldShowScheduledCallNotifyButton;
+    private int notifyScheduledCallReqId = -1;
 
     private boolean isMuted;
 
@@ -328,8 +328,8 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                     int x = getMeasuredWidth() - width - AndroidUtilities.dp(10);
                     int y = AndroidUtilities.dp(10);
                     rect.set(0, 0, width, AndroidUtilities.dp(28));
-                    if (shouldShowScheduledStreamNotifyButton) {
-                        updateNotifyStreamSelectorParams(rect, x, y);
+                    if (shouldShowScheduledCallNotifyButton) {
+                        updateNotifyCallSelectorParams(rect, x, y);
                     }
                     canvas.save();
                     canvas.translate(x, y);
@@ -480,12 +480,13 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             startJoinFlickerAnimation();
         }
 
-        notifyScheduledStreamSelector = new FrameLayout(context);
-        notifyScheduledStreamSelector.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(16), Color.TRANSPARENT, getThemedColor(Theme.key_actionBarDefaultSubmenuItem) & 0x4bffffff));
-        addView(notifyScheduledStreamSelector, new MarginLayoutParams(0, 0));
-        notifyScheduledStreamSelector.setOnClickListener(v -> {
-            if (fragment == null) return;
+        notifyScheduledCallSelector = new FrameLayout(context);
+        notifyScheduledCallSelector.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(16), Color.TRANSPARENT, getThemedColor(Theme.key_actionBarDefaultSubmenuItem) & 0x4bffffff));
+        addView(notifyScheduledCallSelector, new MarginLayoutParams(0, 0));
+        notifyScheduledCallSelector.setOnClickListener(v -> {
+            if (fragment == null || chatActivity == null) return;
 
+            boolean isChannel = ChatObject.isChannelOrGiga(chatActivity.getCurrentChat());
             ConnectionsManager connectionsManager = fragment.getConnectionsManager();
             if (connectionsManager.getConnectionState() != ConnectionsManager.ConnectionStateConnected) {
                 Activity activity = fragment.getParentActivity();
@@ -493,7 +494,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 boolean isAirplaneMode = Settings.System.getInt(activity.getContentResolver(), Settings.System.AIRPLANE_MODE_ON, 0) != 0;
                 AlertDialog.Builder bldr = new AlertDialog.Builder(activity)
                         .setTitle(isAirplaneMode ? LocaleController.getString(R.string.VoipOfflineAirplaneTitle) : LocaleController.getString(R.string.VoipOfflineTitle))
-                        .setMessage(isAirplaneMode ? LocaleController.getString(R.string.VoipScheduledGroupOfflineAirplane) : LocaleController.getString(R.string.VoipScheduledGroupOffline))
+                        .setMessage(isAirplaneMode ? LocaleController.getString(isChannel ? R.string.VoipChannelScheduledOfflineAirplane : R.string.VoipGroupScheduledOfflineAirplane) : LocaleController.getString(isChannel ? R.string.VoipChannelScheduledOffline : R.string.VoipGroupScheduledOffline))
                         .setPositiveButton(LocaleController.getString(R.string.OK), null);
                 if (isAirplaneMode) {
                     final Intent settingsIntent = new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS);
@@ -509,31 +510,30 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 return;
             }
 
-            if (chatActivity == null) return;
-
             ChatObject.Call call = chatActivity.getGroupCall();
-
             if (call != null) {
                 TLRPC.TL_phone_toggleGroupCallStartSubscription req = new TLRPC.TL_phone_toggleGroupCallStartSubscription();
                 req.call = call.getInputGroupCall();
                 req.subscribed = true;
-                if (notifyScheduledStreamReqId != -1) {
-                    connectionsManager.cancelRequest(notifyScheduledStreamReqId, false);
+                if (notifyScheduledCallReqId != -1) {
+                    connectionsManager.cancelRequest(notifyScheduledCallReqId, false);
                 }
-                notifyScheduledStreamReqId = connectionsManager.sendRequest(req, (response, error) -> {
+                notifyScheduledCallReqId = connectionsManager.sendRequest(req, (response, error) -> {
                     if (error != null) {
                         return;
                     }
                     if (response != null) {
                         if (fragment != null) {
                             fragment.getMessagesController().processUpdates((TLRPC.Updates) response, false);
-                            AndroidUtilities.runOnUIThread(this::showScheduledStreamUserNotificationHint);
+                            AndroidUtilities.runOnUIThread(() -> {
+                                showScheduledCallUserNotificationHint(isChannel);
+                            });
                         }
                     }
                 }, ConnectionsManager.RequestFlagFailOnServerErrors);
             }
         });
-        notifyScheduledStreamSelector.setVisibility(View.GONE);
+        notifyScheduledCallSelector.setVisibility(View.GONE);
 
         silentButton = new FrameLayout(context);
         silentButtonImage = new ImageView(context);
@@ -815,12 +815,12 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         });
     }
 
-    private void updateNotifyStreamSelectorParams(RectF rect, int x, int y) {
-        if (notifyScheduledStreamSelector == null) {
+    private void updateNotifyCallSelectorParams(RectF rect, int x, int y) {
+        if (notifyScheduledCallSelector == null) {
             return;
         }
 
-        ViewGroup.MarginLayoutParams params = (MarginLayoutParams) notifyScheduledStreamSelector.getLayoutParams();
+        ViewGroup.MarginLayoutParams params = (MarginLayoutParams) notifyScheduledCallSelector.getLayoutParams();
         if (params.leftMargin == x && params.topMargin == y && params.width == ((int)rect.width()) && params.height == (int)(rect.height())) {
             return;
         }
@@ -830,12 +830,12 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         params.leftMargin = x;
         params.topMargin = y;
 
-        notifyScheduledStreamSelector.setLayoutParams(params);
+        notifyScheduledCallSelector.setLayoutParams(params);
     }
 
-    private void showScheduledStreamUserNotificationHint() {
+    private void showScheduledCallUserNotificationHint(boolean isChannel) {
         if (fragment == null) return;
-        BulletinFactory.of(fragment).createSimpleBulletin(R.raw.silent_unmute, LocaleController.getString(R.string.VoipChannelScheduledVoiceChatWillBeNotified)).show();
+        BulletinFactory.of(fragment).createSimpleBulletin(R.raw.silent_unmute, LocaleController.getString(isChannel ? R.string.VoipChannelScheduledWillBeNotified : R.string.VoipGroupScheduledWillBeNotified)).show();
     }
 
     private boolean slidingSpeed;
@@ -1164,7 +1164,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             titleTextView.setTag(Theme.key_inappPlayerTitle);
             subtitleTextView.setVisibility(GONE);
             joinButton.setVisibility(GONE);
-            notifyScheduledStreamSelector.setVisibility(GONE);
+            notifyScheduledCallSelector.setVisibility(GONE);
             closeButton.setVisibility(GONE);
             playButton.setVisibility(GONE);
             muteButton.setVisibility(GONE);
@@ -1184,7 +1184,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
 
             subtitleTextView.setVisibility(GONE);
             joinButton.setVisibility(GONE);
-            notifyScheduledStreamSelector.setVisibility(GONE);
+            notifyScheduledCallSelector.setVisibility(GONE);
             closeButton.setVisibility(VISIBLE);
             playButton.setVisibility(VISIBLE);
             muteButton.setVisibility(GONE);
@@ -1303,7 +1303,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             playButton.setVisibility(GONE);
             subtitleTextView.setVisibility(GONE);
             joinButton.setVisibility(GONE);
-            notifyScheduledStreamSelector.setVisibility(GONE);
+            notifyScheduledCallSelector.setVisibility(GONE);
 
             titleTextView.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 0, 0, 0, 2));
             titleTextView.setPadding(AndroidUtilities.dp(112), 0, AndroidUtilities.dp(112) + joinButtonWidth, 0);
@@ -2203,13 +2203,13 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                     }
                     subtitleTextView.setText(LocaleController.formatStartsTime(call.call.schedule_date, 4), false);
 
-                    shouldShowScheduledStreamNotifyButton = !call.call.schedule_start_subscribed;
-                    notifyScheduledStreamSelector.setVisibility(shouldShowScheduledStreamNotifyButton ? VISIBLE : GONE);
+                    shouldShowScheduledCallNotifyButton = !call.call.schedule_start_subscribed;
+                    notifyScheduledCallSelector.setVisibility(shouldShowScheduledCallNotifyButton ? VISIBLE : GONE);
                     updateScheduledButtonState();
                 } else {
                     timeLayout = null;
                     joinButton.setVisibility(VISIBLE);
-                    notifyScheduledStreamSelector.setVisibility(GONE);
+                    notifyScheduledCallSelector.setVisibility(GONE);
                     if (!TextUtils.isEmpty(call.call.title)) {
                         titleTextView.setText(call.call.title, false);
                     } else if (call.call.rtmp_stream) {
@@ -2288,11 +2288,11 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     }
 
     private void updateScheduledButtonState() {
-        if (!shouldShowScheduledStreamNotifyButton && !scheduleRunnableScheduled) {
+        if (!shouldShowScheduledCallNotifyButton && !scheduleRunnableScheduled) {
             scheduleRunnableScheduled = true;
             updateScheduleTimeRunnable.run();
-        } else if (shouldShowScheduledStreamNotifyButton) {
-            String str = LocaleController.getString(R.string.VoipChannelScheduledVoiceChatNotifyMe);
+        } else if (shouldShowScheduledCallNotifyButton) {
+            String str = LocaleController.getString(R.string.VoipScheduledNotifyMe);
             int width = (int) Math.ceil(gradientTextPaint.measureText(str));
             timeLayout = new StaticLayout(str, gradientTextPaint, width, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
             frameLayout.invalidate();
