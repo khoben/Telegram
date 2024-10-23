@@ -12,6 +12,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
+import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -29,6 +30,7 @@ import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.text.Layout;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
@@ -56,6 +58,7 @@ import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.DialogObject;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.LocationController;
 import org.telegram.messenger.MediaController;
@@ -133,6 +136,10 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
     private TextView joinButton;
     private int joinButtonWidth;
     private CellFlickerDrawable joinButtonFlicker;
+
+    private FrameLayout notifyScheduledStreamSelector;
+    private boolean shouldShowScheduledStreamNotifyButton;
+    private int notifyScheduledStreamReqId = -1;
 
     private boolean isMuted;
 
@@ -321,6 +328,9 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                     int x = getMeasuredWidth() - width - AndroidUtilities.dp(10);
                     int y = AndroidUtilities.dp(10);
                     rect.set(0, 0, width, AndroidUtilities.dp(28));
+                    if (shouldShowScheduledStreamNotifyButton) {
+                        updateNotifyStreamSelectorParams(rect, x, y);
+                    }
                     canvas.save();
                     canvas.translate(x, y);
                     canvas.drawRoundRect(rect, AndroidUtilities.dp(16), AndroidUtilities.dp(16), gradientPaint);
@@ -469,6 +479,61 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
         if (flickOnAttach) {
             startJoinFlickerAnimation();
         }
+
+        notifyScheduledStreamSelector = new FrameLayout(context);
+        notifyScheduledStreamSelector.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(16), Color.TRANSPARENT, getThemedColor(Theme.key_actionBarDefaultSubmenuItem) & 0x4bffffff));
+        addView(notifyScheduledStreamSelector, new MarginLayoutParams(0, 0));
+        notifyScheduledStreamSelector.setOnClickListener(v -> {
+            if (fragment == null) return;
+
+            ConnectionsManager connectionsManager = fragment.getConnectionsManager();
+            if (connectionsManager.getConnectionState() != ConnectionsManager.ConnectionStateConnected) {
+                Activity activity = fragment.getParentActivity();
+                if (activity == null) return;
+                boolean isAirplaneMode = Settings.System.getInt(activity.getContentResolver(), Settings.System.AIRPLANE_MODE_ON, 0) != 0;
+                AlertDialog.Builder bldr = new AlertDialog.Builder(activity)
+                        .setTitle(isAirplaneMode ? LocaleController.getString(R.string.VoipOfflineAirplaneTitle) : LocaleController.getString(R.string.VoipOfflineTitle))
+                        .setMessage(isAirplaneMode ? LocaleController.getString(R.string.VoipScheduledGroupOfflineAirplane) : LocaleController.getString(R.string.VoipScheduledGroupOffline))
+                        .setPositiveButton(LocaleController.getString(R.string.OK), null);
+                if (isAirplaneMode) {
+                    final Intent settingsIntent = new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS);
+                    if (settingsIntent.resolveActivity(activity.getPackageManager()) != null) {
+                        bldr.setNeutralButton(LocaleController.getString(R.string.VoipOfflineOpenSettings), (dialog, which) -> activity.startActivity(settingsIntent));
+                    }
+                }
+                try {
+                    bldr.show();
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+                return;
+            }
+
+            if (chatActivity == null) return;
+
+            ChatObject.Call call = chatActivity.getGroupCall();
+
+            if (call != null) {
+                TLRPC.TL_phone_toggleGroupCallStartSubscription req = new TLRPC.TL_phone_toggleGroupCallStartSubscription();
+                req.call = call.getInputGroupCall();
+                req.subscribed = true;
+                if (notifyScheduledStreamReqId != -1) {
+                    connectionsManager.cancelRequest(notifyScheduledStreamReqId, false);
+                }
+                notifyScheduledStreamReqId = connectionsManager.sendRequest(req, (response, error) -> {
+                    if (error != null) {
+                        return;
+                    }
+                    if (response != null) {
+                        if (fragment != null) {
+                            fragment.getMessagesController().processUpdates((TLRPC.Updates) response, false);
+                            AndroidUtilities.runOnUIThread(this::showScheduledStreamUserNotificationHint);
+                        }
+                    }
+                }, ConnectionsManager.RequestFlagFailOnServerErrors);
+            }
+        });
+        notifyScheduledStreamSelector.setVisibility(View.GONE);
 
         silentButton = new FrameLayout(context);
         silentButtonImage = new ImageView(context);
@@ -748,6 +813,29 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 checkImport(false);
             }
         });
+    }
+
+    private void updateNotifyStreamSelectorParams(RectF rect, int x, int y) {
+        if (notifyScheduledStreamSelector == null) {
+            return;
+        }
+
+        ViewGroup.MarginLayoutParams params = (MarginLayoutParams) notifyScheduledStreamSelector.getLayoutParams();
+        if (params.leftMargin == x && params.topMargin == y && params.width == ((int)rect.width()) && params.height == (int)(rect.height())) {
+            return;
+        }
+
+        params.height = (int) rect.height();
+        params.width = (int) rect.width();
+        params.leftMargin = x;
+        params.topMargin = y;
+
+        notifyScheduledStreamSelector.setLayoutParams(params);
+    }
+
+    private void showScheduledStreamUserNotificationHint() {
+        if (fragment == null) return;
+        BulletinFactory.of(fragment).createSimpleBulletin(R.raw.silent_unmute, LocaleController.getString(R.string.VoipChannelScheduledVoiceChatWillBeNotified)).show();
     }
 
     private boolean slidingSpeed;
@@ -1076,6 +1164,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             titleTextView.setTag(Theme.key_inappPlayerTitle);
             subtitleTextView.setVisibility(GONE);
             joinButton.setVisibility(GONE);
+            notifyScheduledStreamSelector.setVisibility(GONE);
             closeButton.setVisibility(GONE);
             playButton.setVisibility(GONE);
             muteButton.setVisibility(GONE);
@@ -1095,6 +1184,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
 
             subtitleTextView.setVisibility(GONE);
             joinButton.setVisibility(GONE);
+            notifyScheduledStreamSelector.setVisibility(GONE);
             closeButton.setVisibility(VISIBLE);
             playButton.setVisibility(VISIBLE);
             muteButton.setVisibility(GONE);
@@ -1213,6 +1303,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
             playButton.setVisibility(GONE);
             subtitleTextView.setVisibility(GONE);
             joinButton.setVisibility(GONE);
+            notifyScheduledStreamSelector.setVisibility(GONE);
 
             titleTextView.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 0, 0, 0, 2));
             titleTextView.setPadding(AndroidUtilities.dp(112), 0, AndroidUtilities.dp(112) + joinButtonWidth, 0);
@@ -1321,10 +1412,7 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 muteButton.invalidate();
             }
         } else if (currentStyle == STYLE_INACTIVE_GROUP_CALL) {
-            if (!scheduleRunnableScheduled) {
-                scheduleRunnableScheduled = true;
-                updateScheduleTimeRunnable.run();
-            }
+            updateScheduledButtonState();
         }
 
         if (visible && topPadding == 0) {
@@ -2114,13 +2202,14 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                         }
                     }
                     subtitleTextView.setText(LocaleController.formatStartsTime(call.call.schedule_date, 4), false);
-                    if (!scheduleRunnableScheduled) {
-                        scheduleRunnableScheduled = true;
-                        updateScheduleTimeRunnable.run();
-                    }
+
+                    shouldShowScheduledStreamNotifyButton = !call.call.schedule_start_subscribed;
+                    notifyScheduledStreamSelector.setVisibility(shouldShowScheduledStreamNotifyButton ? VISIBLE : GONE);
+                    updateScheduledButtonState();
                 } else {
                     timeLayout = null;
                     joinButton.setVisibility(VISIBLE);
+                    notifyScheduledStreamSelector.setVisibility(GONE);
                     if (!TextUtils.isEmpty(call.call.title)) {
                         titleTextView.setText(call.call.title, false);
                     } else if (call.call.rtmp_stream) {
@@ -2195,6 +2284,18 @@ public class FragmentContextView extends FrameLayout implements NotificationCent
                 visible = true;
                 setVisibility(VISIBLE);
             }
+        }
+    }
+
+    private void updateScheduledButtonState() {
+        if (!shouldShowScheduledStreamNotifyButton && !scheduleRunnableScheduled) {
+            scheduleRunnableScheduled = true;
+            updateScheduleTimeRunnable.run();
+        } else if (shouldShowScheduledStreamNotifyButton) {
+            String str = LocaleController.getString(R.string.VoipChannelScheduledVoiceChatNotifyMe);
+            int width = (int) Math.ceil(gradientTextPaint.measureText(str));
+            timeLayout = new StaticLayout(str, gradientTextPaint, width, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);
+            frameLayout.invalidate();
         }
     }
 
