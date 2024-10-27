@@ -24869,7 +24869,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             startBotHintIcon.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_gifSaveHintText), PorterDuff.Mode.MULTIPLY));
             startBotHintIcon.setSize(dp(20), dp(20));
             startBotHint.setIcon(startBotHintIcon);
-            startBotHintIcon.start();
+            if (!SharedConfig.deviceIsLow() && !LiteMode.isPowerSaverApplied()) {
+                startBotHintIcon.start();
+            }
             startBotHint.setMultilineText(false);
             startBotHint.setTextAlign(Layout.Alignment.ALIGN_CENTER);
             startBotHint.setRounding(12);
