@@ -91,6 +91,11 @@
   <init>(com.google.android.exoplayer2.upstream.DataSource$Factory);
 }
 
+-dontwarn com.google.android.exoplayer2.util.NonNullApi
+-keep class androidx.mediarouter.app.MediaRouteActionProvider {
+  *;
+}
+
 # Huawei Services
 -keep class com.huawei.hianalytics.**{ *; }
 -keep class com.huawei.updatesdk.**{ *; }
