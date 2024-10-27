@@ -30,6 +30,7 @@ import android.view.Surface;
 import android.view.SurfaceView;
 import android.view.TextureView;
 import android.view.ViewGroup;
+import android.webkit.MimeTypeMap;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -40,6 +41,7 @@ import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.MediaItem;
+import com.google.android.exoplayer2.MediaMetadata;
 import com.google.android.exoplayer2.PlaybackException;
 import com.google.android.exoplayer2.PlaybackParameters;
 import com.google.android.exoplayer2.Player;
@@ -51,6 +53,8 @@ import com.google.android.exoplayer2.audio.AudioProcessor;
 import com.google.android.exoplayer2.audio.AudioSink;
 import com.google.android.exoplayer2.audio.DefaultAudioSink;
 import com.google.android.exoplayer2.audio.TeeAudioProcessor;
+import com.google.android.exoplayer2.ext.cast.CastPlayer;
+import com.google.android.exoplayer2.ext.cast.SessionAvailabilityListener;
 import com.google.android.exoplayer2.mediacodec.MediaCodecRenderer;
 import com.google.android.exoplayer2.mediacodec.MediaCodecUtil;
 import com.google.android.exoplayer2.source.LoopingMediaSource;
@@ -66,17 +70,25 @@ import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.trackselection.MappingTrackSelector;
 import com.google.android.exoplayer2.trackselection.TrackSelectionOverride;
 import com.google.android.exoplayer2.trackselection.TrackSelectionParameters;
+import com.google.android.exoplayer2.upstream.DataSpec;
 import com.google.android.exoplayer2.upstream.DefaultAllocator;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.video.SurfaceNotValidException;
 import com.google.android.exoplayer2.video.VideoListener;
 import com.google.android.exoplayer2.video.VideoSize;
+import com.google.android.gms.cast.CastDevice;
+import com.google.android.gms.cast.MediaStatus;
+import com.google.android.gms.cast.framework.CastSession;
+import com.google.android.gms.cast.framework.CastState;
+import com.google.android.gms.cast.framework.CastStateListener;
+import com.google.android.gms.cast.framework.media.RemoteMediaClient;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.DispatchQueue;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.FileStreamLoadOperation;
 import org.telegram.messenger.FourierTransform;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
@@ -84,28 +96,57 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.cast.CastContextHolder;
+import org.telegram.messenger.cast.CastItem;
+import org.telegram.messenger.cast.CastMetaDataMusic;
+import org.telegram.messenger.cast.CastMetadata;
+import org.telegram.messenger.cast.CastPath;
+import org.telegram.messenger.cast.CastShareServer;
+import org.telegram.messenger.cast.SimpleCastPath;
+import org.telegram.messenger.cast.StreamingCastPath;
 import org.telegram.messenger.secretmedia.ExtendedDefaultDataSourceFactory;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.Stories.recorder.StoryEntry;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
 
 @SuppressLint("NewApi")
-public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsListener, NotificationCenter.NotificationCenterDelegate {
+public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsListener, NotificationCenter.NotificationCenterDelegate, SessionAvailabilityListener, CastStateListener {
 
     private DispatchQueue workerQueue;
     private boolean isStory;
+    private boolean isCast;
+    private boolean isPrepareCast;
 
     public boolean createdWithAudioTrack() {
         return !audioDisabled;
+    }
+
+    @Override
+    public void onCastStateChanged(int state) {
+        VideoPlayerDelegate playerDelegate = delegate;
+        if (playerDelegate == null) return;
+        if (state == CastState.NO_DEVICES_AVAILABLE) {
+            if (isCast || isPrepareCast) {
+                stopCast(CAST_ABORTED);
+            }
+        } else if (state == CastState.NOT_CONNECTED) {
+            if (isCast) {
+                stopCast(CAST_ENDED);
+            }
+        } else if (state == CastState.CONNECTING) {
+            playerDelegate.onCastPrepare();
+        } else if (state == CastState.CONNECTED) {
+            playerDelegate.onCastPrepared();
+        }
     }
 
     public interface VideoPlayerDelegate {
@@ -124,7 +165,29 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         default void onSeekFinished(AnalyticsListener.EventTime eventTime) {
 
         }
+
+        default void onCastPrepare() {
+
+        }
+
+        default void onCastStarted(@Nullable String castDeviceName) {
+
+        }
+
+        default void onCastStopped() {
+
+        }
+
+        default void onCastPrepared() {
+
+        }
+
+        default CastMetadata onCastMetadataRequested() {
+            return null;
+        }
     }
+    private static final int CAST_ABORTED = 1;
+    private static final int CAST_ENDED = 2;
 
     public interface AudioVisualizerDelegate {
         void onVisualizerUpdate(boolean playing, boolean animate, float[] values);
@@ -133,6 +196,41 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     public ExoPlayer player;
     private ExoPlayer audioPlayer;
+    private CastPlayer castPlayer;
+    private final Player.Listener castPlayerListener = new Player.Listener() {
+        @Override
+        public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
+            maybeReportPlayerState();
+            if (playWhenReady && playbackState == Player.STATE_READY && !isMuted() && shouldPauseOther) {
+                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.playerDidStartPlaying, VideoPlayer.this);
+            }
+            if (playWhenReady && playbackState == Player.STATE_READY) {
+                checkPlayersReady();
+            } else if (playbackState == Player.STATE_IDLE) {
+                CastSession castSession = CastContextHolder.context.getSessionManager().getCurrentCastSession();
+                if (castSession == null) {
+                    stopCast(CAST_ABORTED);
+                    return;
+                }
+                RemoteMediaClient remoteMediaClient = castSession.getRemoteMediaClient();
+                if (remoteMediaClient == null) {
+                    stopCast(CAST_ABORTED);
+                    return;
+                }
+                int idleReason = remoteMediaClient.getIdleReason();
+                if (idleReason == MediaStatus.IDLE_REASON_FINISHED) {
+                    stopCast(CAST_ENDED);
+                } else if (idleReason != MediaStatus.IDLE_REASON_NONE) {
+                    stopCast(CAST_ABORTED);
+                }
+            }
+        }
+
+        @Override
+        public void onPlayerError(PlaybackException error) {
+            stopCast(CAST_ABORTED);
+        }
+    };
     private DefaultBandwidthMeter bandwidthMeter;
     private MappingTrackSelector trackSelector;
     private ExtendedDefaultDataSourceFactory mediaDataSourceFactory;
@@ -155,7 +253,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     private VideoPlayerDelegate delegate;
     private AudioVisualizerDelegate audioVisualizerDelegate;
     private int lastReportedPlaybackState;
+    private int lastReportedCastPlaybackState;
     private boolean lastReportedPlayWhenReady;
+    private boolean lastReportedCastPlayWhenReady;
 
     private ArrayList<Quality> videoQualities;
     private Quality videoQualityToSelect;
@@ -189,6 +289,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             trackSelector.setParameters(trackSelector.getParameters().buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build());
         }
         lastReportedPlaybackState = ExoPlayer.STATE_IDLE;
+        lastReportedCastPlaybackState = ExoPlayer.STATE_IDLE;
         shouldPauseOther = pauseOther;
         if (pauseOther) {
             NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.playerDidStartPlaying);
@@ -203,6 +304,156 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             if (p != this && isPlaying() && !allowMultipleInstances) {
                 pause();
             }
+        }
+    }
+
+    @Override
+    public void onCastSessionAvailable() {
+        startCast();
+    }
+
+    @Override
+    public void onCastSessionUnavailable() {
+        stopCast(CAST_ABORTED);
+    }
+
+    private void startCast() {
+        if (player == null || castPlayer == null) {
+            return;
+        }
+
+        isCast = true;
+        CastPath path = null;
+        Uri uri = videoUri;
+        if (uri == null) {
+            Quality current = (videoQualityToSelect == null) ? videoQualityToSelect : getCurrentQuality();
+            if (current == null) {
+                // Force to use lowest :)
+                current = getLowestQuality();
+            }
+            if (current != null) {
+                VideoUri qVideoUri = current.uris.get(0);
+                uri = qVideoUri.uri;
+            } else {
+                stopCast(CAST_ABORTED);
+                return;
+            }
+        }
+        if (uri == null) {
+            stopCast(CAST_ABORTED);
+            return;
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null) {
+            stopCast(CAST_ABORTED);
+            return;
+        }
+
+        String filename = null;
+        String mimeType = null;
+        long size = -1L;
+
+        CastMetadata castMetadata = null;
+        if (delegate != null) {
+            castMetadata = delegate.onCastMetadataRequested();
+        }
+
+        if (scheme.startsWith("file")) {
+            path = new SimpleCastPath(uri.getPath());
+            if (castMetadata != null) {
+                filename = castMetadata.getFilename();
+                mimeType = castMetadata.getMimeType();
+                size = castMetadata.getSize();
+            } else {
+                filename = uri.getLastPathSegment();
+                if (filename != null) {
+                    int extIndex = filename.lastIndexOf('.');
+                    if (extIndex != -1) {
+                        String ext = filename.substring(extIndex + 1);
+                        mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+                    }
+                }
+            }
+        } else if (scheme.startsWith("tg")) {
+            FileStreamLoadOperation loadOp = new FileStreamLoadOperation();
+            try {
+                loadOp.open(new DataSpec.Builder().setUri(uri).build());
+            } catch (IOException e) {
+                stopCast(CAST_ABORTED);
+                return;
+            }
+            path = new StreamingCastPath(loadOp);
+            if (castMetadata != null) {
+                filename = castMetadata.getFilename();
+                mimeType = castMetadata.getMimeType();
+                size = castMetadata.getSize();
+            } else {
+                filename = uri.getHost();
+                mimeType = uri.getQueryParameter("mime");
+                size = Utilities.parseLong(uri.getQueryParameter("size"));
+            }
+        } else {
+            stopCast(CAST_ABORTED);
+            return;
+        }
+        if (mimeType == null) {
+            stopCast(CAST_ABORTED);
+            return;
+        }
+
+        MediaMetadata metadata = null;
+        if (castMetadata instanceof CastMetaDataMusic) {
+            CastMetaDataMusic castMetaDataMusic = (CastMetaDataMusic)castMetadata;
+            metadata = new MediaMetadata.Builder()
+                    .setArtist(castMetaDataMusic.getAuthor())
+                    .setTitle(castMetaDataMusic.getTitle()).build();
+        }
+        String remoteUri = CastShareServer.register(filename, new CastItem(path, mimeType, size));
+        castPlayer.setMediaItem(
+                new MediaItem.Builder()
+                        .setUri(remoteUri)
+                        .setMediaMetadata(metadata)
+                        .setMimeType(mimeType)
+                        .build(),
+                player.getCurrentPosition()
+        );
+        castPlayer.setRepeatMode(player.getRepeatMode());
+        castPlayer.setPlayWhenReady(true);
+        castPlayer.prepare();
+
+        if (delegate != null) {
+            String castDeviceName = null;
+            CastSession castSession = CastContextHolder.context.getSessionManager().getCurrentCastSession();
+            if (castSession != null) {
+                CastDevice castDevice = castSession.getCastDevice();
+                if (castDevice != null) {
+                    castDeviceName = castDevice.getFriendlyName();
+                }
+            }
+            delegate.onCastStarted(castDeviceName);
+        }
+    }
+
+    private void stopCast(int reason) {
+        isPrepareCast = false;
+        isCast = false;
+        CastShareServer.unregisterAll();
+//        CastHttpShareService.stopService();
+        if (reason == CAST_ABORTED) {
+            if (castPlayer != null && player != null) {
+                player.seekTo(castPlayer.getCurrentPosition());
+            }
+        } else if (reason == CAST_ENDED) {
+            if (player != null) {
+                player.seekTo(0);
+            }
+        }
+        if (castPlayer != null) {
+            castPlayer.stop();
+        }
+        CastContextHolder.context.getSessionManager().endCurrentSession(true);
+        if (delegate != null) {
+            delegate.onCastStopped();
         }
     }
 
@@ -274,6 +525,20 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 audioPlayer.setPlayWhenReady(autoplay);
             }
         }
+        if (castPlayer == null) {
+            CastContextHolder.context.removeCastStateListener(this);
+            CastContextHolder.context.addCastStateListener(this);
+            castPlayer = new CastPlayer(CastContextHolder.context);
+            castPlayer.setSessionAvailabilityListener(this);
+            castPlayer.addListener(castPlayerListener);
+            castPlayer.setPlayWhenReady(autoplay);
+            castPlayer.setRepeatMode(looping ? ExoPlayer.REPEAT_MODE_ALL : ExoPlayer.REPEAT_MODE_OFF);
+        }
+    }
+
+    public void onCastClicked() {
+        pause();
+        isPrepareCast = true;
     }
 
     public void preparePlayerLoop(Uri videoUri, String videoType, Uri audioUri, String audioType) {
@@ -578,8 +843,8 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     private void setSelectedQuality(boolean start, Quality quality) {
         if (player == null) return;
 
-        final boolean lastPlaying = player.isPlaying();
-        final long lastPosition = player.getCurrentPosition();
+        final boolean lastPlaying = !isCast ? player.isPlaying() : castPlayer.isPlaying();
+        final long lastPosition = !isCast ? player.getCurrentPosition() : castPlayer.getCurrentPosition();
         if (!start) {
             fallbackPosition = lastPosition;
             fallbackDuration = player.getDuration();
@@ -633,11 +898,17 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         }
 
         if (reset) {
+            castPlayer.prepare();
             player.prepare();
             if (!start) {
+                castPlayer.seekTo(castPlayer.getCurrentMediaItemIndex(), lastPosition);
                 player.seekTo(lastPosition);
                 if (lastPlaying) {
-                    player.play();
+                    if (isCast) {
+                        castPlayer.play();
+                    } else {
+                        player.play();
+                    }
                 }
             }
         }
@@ -974,6 +1245,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public boolean isPlayerPrepared() {
+        if (isCast || isPrepareCast) {
+            return castPlayer != null;
+        }
         return player != null;
     }
 
@@ -986,6 +1260,12 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             audioPlayer.release();
             audioPlayer = null;
         }
+        if (castPlayer != null) {
+            castPlayer.setSessionAvailabilityListener(null);
+            castPlayer.release();
+            castPlayer = null;
+        }
+        CastContextHolder.context.removeCastStateListener(this);
         if (shouldPauseOther) {
             NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.playerDidStartPlaying);
         }
@@ -1049,10 +1329,16 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public boolean getPlayWhenReady() {
+        if (isCast) {
+            return castPlayer.getPlayWhenReady();
+        }
         return player.getPlayWhenReady();
     }
 
     public int getPlaybackState() {
+        if (isCast) {
+            return castPlayer.getPlaybackState();
+        }
         return player.getPlaybackState();
     }
 
@@ -1061,6 +1347,12 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public void play() {
+        if (isCast) {
+            if (castPlayer != null) {
+                castPlayer.setPlayWhenReady(true);
+            }
+            return;
+        }
         mixedPlayWhenReady = true;
         if (mixedAudio) {
             if (!audioPlayerReady || !videoPlayerReady) {
@@ -1082,6 +1374,12 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public void pause() {
+        if (isCast || isPrepareCast) {
+            if (castPlayer != null) {
+                castPlayer.setPlayWhenReady(false);
+            }
+            return;
+        }
         mixedPlayWhenReady = false;
         if (player != null) {
             player.setPlayWhenReady(false);
@@ -1097,12 +1395,22 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public void setPlaybackSpeed(float speed) {
+        PlaybackParameters params = new PlaybackParameters(speed, speed > 1.0f ? 0.98f : 1.0f);
+        if (castPlayer != null) {
+            castPlayer.setPlaybackParameters(params);
+        }
         if (player != null) {
-            player.setPlaybackParameters(new PlaybackParameters(speed, speed > 1.0f ? 0.98f : 1.0f));
+            player.setPlaybackParameters(params);
         }
     }
 
     public void setPlayWhenReady(boolean playWhenReady) {
+        if (isCast) {
+            if (castPlayer != null) {
+                castPlayer.setPlayWhenReady(playWhenReady);
+            }
+            return;
+        }
         mixedPlayWhenReady = playWhenReady;
         if (playWhenReady && mixedAudio) {
             if (!audioPlayerReady || !videoPlayerReady) {
@@ -1132,6 +1440,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public long getCurrentPosition() {
+        if (isCast) {
+            return castPlayer != null ? castPlayer.getCurrentPosition() : 0;
+        }
         if (fallbackPosition != C.TIME_UNSET) {
             return fallbackPosition;
         }
@@ -1139,10 +1450,19 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public boolean isMuted() {
+        if (isCast) {
+            return castPlayer != null && castPlayer.getVolume() == 0.0f;
+        }
         return player != null && player.getVolume() == 0.0f;
     }
 
     public void setMute(boolean value) {
+        if (isCast) {
+            if (castPlayer != null) {
+                castPlayer.setVolume(value ? 0.0f : 1.0f);
+            }
+            return;
+        }
         if (player != null) {
             player.setVolume(value ? 0.0f : 1.0f);
         }
@@ -1162,6 +1482,12 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public void setVolume(float volume) {
+        if (isCast) {
+            if (castPlayer != null) {
+                castPlayer.setVolume(volume);
+            }
+            return;
+        }
         if (player != null) {
             player.setVolume(volume);
         }
@@ -1175,6 +1501,12 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public void seekTo(long positionMs, boolean fast) {
+        if (isCast) {
+            if (castPlayer != null) {
+                castPlayer.seekTo(castPlayer.getCurrentMediaItemIndex(), positionMs);
+            }
+            return;
+        }
         if (player != null) {
             player.setSeekParameters(fast ? SeekParameters.CLOSEST_SYNC : SeekParameters.EXACT);
             player.seekTo(positionMs);
@@ -1190,10 +1522,16 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public int getBufferedPercentage() {
+        if (isCast) {
+            return isStreaming ? (castPlayer != null ? castPlayer.getBufferedPercentage() : 0) : 100;
+        }
         return isStreaming ? (player != null ? player.getBufferedPercentage() : 0) : 100;
     }
 
     public long getBufferedPosition() {
+        if (isCast) {
+            return (castPlayer != null && player != null) ? (isStreaming ? castPlayer.getBufferedPosition() : player.getDuration()) : 0;
+        }
         return player != null ? (isStreaming ? player.getBufferedPosition() : player.getDuration()) : 0;
     }
 
@@ -1202,11 +1540,20 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public boolean isPlaying() {
+        if (isCast) {
+            return castPlayer != null && castPlayer.getPlayWhenReady();
+        }
         return mixedAudio && mixedPlayWhenReady || player != null && player.getPlayWhenReady();
     }
 
     public boolean isBuffering() {
-        return player != null && lastReportedPlaybackState == ExoPlayer.STATE_BUFFERING;
+        if (isPrepareCast) {
+            return true;
+        }
+        if (isCast) {
+            return castPlayer != null && lastReportedCastPlaybackState == Player.STATE_BUFFERING;
+        }
+        return player != null && lastReportedPlaybackState == Player.STATE_BUFFERING;
     }
 
 
@@ -1237,6 +1584,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             if (player != null) {
                 player.setRepeatMode(looping ? ExoPlayer.REPEAT_MODE_ALL : ExoPlayer.REPEAT_MODE_OFF);
             }
+            if (castPlayer != null) {
+                castPlayer.setRepeatMode(looping ? ExoPlayer.REPEAT_MODE_ALL : ExoPlayer.REPEAT_MODE_OFF);
+            }
         }
     }
 
@@ -1245,9 +1595,17 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     private void checkPlayersReady() {
+        if (isCast) {
+            play();
+            return;
+        }
         if (audioPlayerReady && videoPlayerReady && mixedPlayWhenReady) {
             play();
         }
+    }
+
+    public void stopRemoteCasting() {
+        stopCast(CAST_ABORTED);
     }
 
     @Override
@@ -1353,6 +1711,19 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     private void maybeReportPlayerState() {
+        if (isCast) {
+            if (castPlayer == null) {
+                return;
+            }
+            boolean playWhenReady = castPlayer.getPlayWhenReady();
+            int playbackState = castPlayer.getPlaybackState();
+            if (lastReportedCastPlayWhenReady != playWhenReady || lastReportedCastPlaybackState != playbackState) {
+                delegate.onStateChanged(playWhenReady, playbackState);
+                lastReportedCastPlayWhenReady = playWhenReady;
+                lastReportedCastPlaybackState = playbackState;
+            }
+            return;
+        }
         if (player == null) {
             return;
         }

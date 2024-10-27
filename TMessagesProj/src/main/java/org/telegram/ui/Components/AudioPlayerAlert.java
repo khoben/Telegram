@@ -54,11 +54,12 @@ import androidx.core.graphics.ColorUtils;
 import androidx.dynamicanimation.animation.FloatValueHolder;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
+import androidx.mediarouter.app.MediaRouteButton;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.exoplayer2.C;
-
+import com.google.android.gms.cast.framework.CastButtonFactory;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildVars;
@@ -121,6 +122,11 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
     private ImageView emptyImageView;
     private TextView emptyTitleTextView;
     private TextView emptySubtitleTextView;
+
+    private MediaRouteButton fakeCastButton;
+    private FrameLayout castView;
+    private TextView castViewText;
+    private TextView castCancelButton;
 
     private FrameLayout playerLayout;
     private CoverContainer coverContainer;
@@ -261,6 +267,7 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileLoadProgressChanged);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.musicDidLoad);
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.moreMusicDidLoad);
+        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.castStateEvent);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.messagePlayingSpeedChanged);
 
         containerView = new FrameLayout(context) {
@@ -430,6 +437,40 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         };
         containerView.setWillNotDraw(false);
         containerView.setPadding(backgroundPaddingLeft, 0, backgroundPaddingLeft, 0);
+
+        if (fakeCastButton != null) {
+            containerView.removeView(fakeCastButton);
+            fakeCastButton = null;
+        }
+        fakeCastButton = new MediaRouteButton(context);
+        fakeCastButton.setVisibility(View.INVISIBLE);
+//        fakeCastButton.setDialogFactory(new MediaRouteDialogFactory() {
+//            @Override
+//            @NonNull
+//            public MediaRouteChooserDialogFragment onCreateChooserDialogFragment() {
+//                return new MediaRouteChooserDialogFragment() {
+//                    @Override
+//                    public MediaRouteChooserDialog onCreateChooserDialog(
+//                            Context context, Bundle savedInstanceState) {
+//                        return new MediaRouteChooserDialog(context);
+//                    }
+//                };
+//            }
+//
+//            @Override
+//            @NonNull
+//            public MediaRouteControllerDialogFragment onCreateControllerDialogFragment() {
+//                return new MediaRouteControllerDialogFragment() {
+//                    @Override
+//                    public MediaRouteControllerDialog onCreateControllerDialog(
+//                            Context context, Bundle savedInstanceState) {
+//                        return new MediaRouteControllerDialog(context);
+//                    }
+//                };
+//            }
+//        });
+        containerView.addView(fakeCastButton);
+        CastButtonFactory.setUpMediaRouteButton(context, fakeCastButton);
 
         actionBar = new ActionBar(context, resourcesProvider) {
             @Override
@@ -1093,6 +1134,7 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
             optionsButton.setBackgroundDrawable(Theme.createSelectorDrawable(getThemedColor(Theme.key_listSelector), 1, AndroidUtilities.dp(18)));
         }
         bottomView.addView(optionsButton, LayoutHelper.createFrame(48, 48, Gravity.LEFT | Gravity.TOP));
+        optionsButton.addSubItem(6, R.drawable.ic_cast, LocaleController.getString(R.string.Cast));
         optionsButton.addSubItem(1, R.drawable.msg_forward, LocaleController.getString(R.string.Forward));
         optionsButton.addSubItem(2, R.drawable.msg_shareout, LocaleController.getString(R.string.ShareFile));
         optionsButton.addSubItem(5, R.drawable.msg_download, LocaleController.getString(R.string.SaveToMusic));
@@ -1224,6 +1266,42 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         playlist = MediaController.getInstance().getPlaylist();
         listAdapter.notifyDataSetChanged();
 
+        castView = new FrameLayout(containerView.getContext());
+        castView.setBackgroundColor(0x3C000000);
+
+        castViewText = new TextView(containerView.getContext());
+        castViewText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        castViewText.setSingleLine(true);
+        castViewText.setMaxLines(1);
+        castViewText.setTypeface(AndroidUtilities.bold());
+        castViewText.setText(LocaleController.getString(R.string.Casting));
+        castViewText.setEllipsize(TextUtils.TruncateAt.END);
+        castViewText.setTextColor(0xffffffff);
+        castViewText.setGravity(Gravity.CENTER_HORIZONTAL);
+        castView.addView(castViewText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 8, 0 ,0));
+
+        castCancelButton = new TextView(containerView.getContext());
+        castCancelButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        castCancelButton.setSingleLine(true);
+        castCancelButton.setMaxLines(1);
+        castCancelButton.setTypeface(AndroidUtilities.bold());
+        castCancelButton.setText(LocaleController.getString(R.string.Cancel));
+        castCancelButton.setEllipsize(TextUtils.TruncateAt.END);
+        castCancelButton.setGravity(Gravity.CENTER_HORIZONTAL);
+        castCancelButton.setPadding(AndroidUtilities.dp(12), AndroidUtilities.dp(8), AndroidUtilities.dp(12), AndroidUtilities.dp(8));
+        castCancelButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(AndroidUtilities.dp(8), 0x7F000000, 0xFF000000));
+        castCancelButton.setTextColor(getThemedColor(Theme.key_featuredStickers_buttonText));
+
+        castCancelButton.setOnClickListener(v -> {
+            MediaController.getInstance().stopAudioCasting();
+            castView.setVisibility(View.GONE);
+            toggleControlsOnCast(false);
+        });
+        castView.addView(castCancelButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 36, 0, 0));
+
+        castView.setVisibility(View.GONE);
+        playerLayout.addView(castView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+
         containerView.addView(playerLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 179, Gravity.LEFT | Gravity.BOTTOM));
         containerView.addView(playerShadow, new FrameLayout.LayoutParams(LayoutHelper.MATCH_PARENT, AndroidUtilities.getShadowHeight(), Gravity.LEFT | Gravity.BOTTOM));
         FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) playerShadow.getLayoutParams();
@@ -1254,6 +1332,11 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         updateTitle(false);
         updateRepeatButton();
         updateEmptyView();
+    }
+
+    private boolean isCasting = false;
+    private void toggleControlsOnCast(boolean isCast) {
+        isCasting = isCast;
     }
 
     @Override
@@ -1595,6 +1678,11 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
                 path = FileLoader.getInstance(currentAccount).getPathToMessage(messageObject.messageOwner).toString();
             }
             MediaController.saveFile(path, parentActivity, 3, fileName, messageObject.getDocument() != null ? messageObject.getDocument().mime_type : "", uri -> BulletinFactory.of((FrameLayout) containerView, resourcesProvider).createDownloadBulletin(BulletinFactory.FileType.AUDIO).show());
+        } else if (id == 6) {
+            MediaController.getInstance().requestAudioCasting();
+            if (fakeCastButton != null) {
+                fakeCastButton.performClick();
+            }
         }
     }
 
@@ -1755,6 +1843,40 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
                     seekBarBufferSpring.start();
                 }
             }
+        } else if (id == NotificationCenter.castStateEvent) {
+            String state = (String) args[0];
+            switch (state) {
+                case "prepare":
+                    if (castView != null) {
+                        castView.setVisibility(View.VISIBLE);
+                        castViewText.setText(LocaleController.getString(R.string.CastingPreparing));
+                    }
+                    toggleControlsOnCast(true);
+                    break;
+                case "prepared":
+                    if (castView != null) {
+                        castView.setVisibility(View.VISIBLE);
+                        castViewText.setText(LocaleController.getString(R.string.CastingPrepared));
+                    }
+                    toggleControlsOnCast(true);
+                    break;
+                case "started":
+                    String castDeviceName = (String) args[1];
+                    if (castView != null) {
+                        castView.setVisibility(View.VISIBLE);
+                        castViewText.setText(castDeviceName != null ? LocaleController.formatString(R.string.CastingTo, castDeviceName) : LocaleController.getString(R.string.Casting));
+                    }
+                    toggleControlsOnCast(true);
+                    // Update ui state to playing
+                    playButton.performClick();
+                    break;
+                case "stopped":
+                    if (castView != null) {
+                        castView.setVisibility(View.GONE);
+                    }
+                    toggleControlsOnCast(false);
+                    break;
+            }
         }
     }
 
@@ -1839,8 +1961,10 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.fileLoadProgressChanged);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.musicDidLoad);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.moreMusicDidLoad);
+        NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.castStateEvent);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.messagePlayingSpeedChanged);
         DownloadController.getInstance(currentAccount).removeLoadingFileObserver(this);
+        MediaController.getInstance().stopAudioCasting();
     }
 
     @Override

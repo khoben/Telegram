@@ -133,6 +133,7 @@ import androidx.dynamicanimation.animation.DynamicAnimation;
 import androidx.dynamicanimation.animation.FloatValueHolder;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
+import androidx.mediarouter.app.MediaRouteButton;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.LinearSmoothScrollerEnd;
@@ -142,6 +143,7 @@ import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.analytics.AnalyticsListener;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
+import com.google.android.gms.cast.framework.CastButtonFactory;
 import com.google.android.gms.vision.Frame;
 import com.google.android.gms.vision.face.Face;
 import com.google.android.gms.vision.face.FaceDetector;
@@ -184,6 +186,7 @@ import org.telegram.messenger.VideoEditedInfo;
 import org.telegram.messenger.WebFile;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.messenger.camera.Size;
+import org.telegram.messenger.cast.CastMetadata;
 import org.telegram.messenger.video.VideoPlayerRewinder;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
@@ -811,11 +814,13 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private ActionBarMenuSubItem speedItem;
     private ActionBarMenuSubItem qualityItem;
     private ActionBarPopupWindow.GapView speedGap;
+    private ActionBarPopupWindow.GapView castGap;
     private ActionBarMenu menu;
     private ActionBarMenuItem sendItem;
     private ActionBarMenuItem editItem;
     private ActionBarMenuItem pipItem;
     private ActionBarMenuItem masksItem;
+    private ActionBarMenuSubItem castItem;
     private LinearLayout itemsLayout;
     private ChooseQualityLayout.QualityIcon qualityIcon;
     private ChooseSpeedLayout chooseSpeedLayout;
@@ -2008,6 +2013,12 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
     private final static int gallery_menu_hide_translation = 22;
     private final static int gallery_menu_reply = 23;
 
+    private final static int gallery_menu_cast = 24;
+    private MediaRouteButton fakeCastButton;
+    private FrameLayout castView;
+    private TextView castViewText;
+    private TextView castCancelButton;
+
     private final static int ads_sponsor_info = 101;
     private final static int ads_about = 102;
     private final static int ads_report = 103;
@@ -2867,7 +2878,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 if (child.getVisibility() == GONE || child == groupedPhotosListView) {
                     continue;
                 }
-                if (child == aspectRatioFrameLayout) {
+                if (child == aspectRatioFrameLayout || child == castView) {
                     int heightSpec = MeasureSpec.makeMeasureSpec(AndroidUtilities.displaySize.y + (isStatusBarVisible() ? AndroidUtilities.statusBarHeight : 0), MeasureSpec.EXACTLY);
                     child.measure(widthMeasureSpec, heightSpec);
                 } else if (child == paintingOverlay) {
@@ -2935,7 +2946,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     continue;
                 }
                 int l, r, b;
-                if (child == aspectRatioFrameLayout) {
+                if (child == aspectRatioFrameLayout || child == castView) {
                     l = _l;
                     r = _r;
                     b = _b;
@@ -4709,6 +4720,45 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             windowLayoutParams.flags = WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
         }
 
+        castView = new FrameLayout(containerView.getContext());
+        castView.setBackgroundColor(0x3C000000);
+
+        castViewText = new TextView(containerView.getContext());
+        castViewText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+        castViewText.setSingleLine(true);
+        castViewText.setMaxLines(1);
+        castViewText.setTypeface(AndroidUtilities.bold());
+        castViewText.setText(LocaleController.getString(R.string.Casting));
+        castViewText.setEllipsize(TextUtils.TruncateAt.END);
+        castViewText.setTextColor(0xffffffff);
+        castViewText.setGravity(Gravity.CENTER);
+        castView.addView(castViewText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER, 0, 46, 0 ,0));
+
+        castCancelButton = new TextView(containerView.getContext());
+        castCancelButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+        castCancelButton.setSingleLine(true);
+        castCancelButton.setMaxLines(1);
+        castCancelButton.setTypeface(AndroidUtilities.bold());
+        castCancelButton.setText(LocaleController.getString(R.string.Cancel));
+        castCancelButton.setEllipsize(TextUtils.TruncateAt.END);
+        castCancelButton.setGravity(Gravity.CENTER);
+        castCancelButton.setPadding(dp(12), dp(8), dp(12), dp(8));
+        castCancelButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(8), 0x7F000000, 0xFF000000));
+        castCancelButton.setTextColor(getThemedColor(Theme.key_featuredStickers_buttonText));
+
+        castCancelButton.setOnClickListener(v -> {
+            if (videoPlayer != null) {
+                videoPlayer.stopRemoteCasting();
+            }
+            castView.setVisibility(View.GONE);
+            toggleMiniProgress(false, false);
+            toggleControlsOnCast(false);
+        });
+        castView.addView(castCancelButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 0, 82, 0, 0));
+
+        castView.setVisibility(View.GONE);
+        containerView.addView(castView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
+
         paintingOverlay = new PaintingOverlay(parentActivity);
         containerView.addView(paintingOverlay, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
         leftPaintingOverlay = new PaintingOverlay(parentActivity);
@@ -4924,6 +4974,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     closePhoto(false, false);
                     currentMessageObject = null;
                 } else if (id == gallery_menu_send) {
+                    if (isCasting) {
+                        showNotAvailableDuringCastingBulletin();
+                        return;
+                    }
                     if (currentMessageObject == null || !(parentActivity instanceof LaunchActivity)) {
                         return;
                     }
@@ -5038,6 +5092,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                         closePhoto(false, false);
                     }
                 } else if (id == gallery_menu_paint) {
+                    if (isCasting) {
+                        showNotAvailableDuringCastingBulletin();
+                        return;
+                    }
                     openCurrentPhotoInPaintModeForSelect();
                 } else if (id == gallery_menu_delete) {
                     if (parentActivity == null || placeProvider == null) {
@@ -5258,6 +5316,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                         FileLog.e(e);
                     }
                 } else if (id == gallery_menu_masks || id == gallery_menu_masks2) {
+                    if (isCasting) {
+                        showNotAvailableDuringCastingBulletin();
+                        return;
+                    }
                     if (parentActivity == null || currentMessageObject == null) {
                         return;
                     }
@@ -5280,6 +5342,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     };
                     masksAlert.show();
                 } else if (id == gallery_menu_pip) {
+                    if (isCasting) {
+                        showNotAvailableDuringCastingBulletin();
+                        return;
+                    }
                     if (pipItem.getAlpha() != 1.0f) {
                         return;
                     }
@@ -5453,6 +5519,13 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                         menuItem.hideSubItem(gallery_menu_hide_translation);
                     }, 32);
                     updateCaptionTranslated();
+                } else if (id == gallery_menu_cast) {
+                    if (fakeCastButton != null) {
+                        fakeCastButton.performClick();
+                    }
+                    if (videoPlayer != null) {
+                        videoPlayer.onCastClicked();
+                    }
                 }
             }
 
@@ -5488,6 +5561,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             if (currentMessageObject != null && currentMessageObject.isSponsored()) {
                 openAdsMenu();
             } else if (actionBar.actionBarMenuOnItemClick.canOpenMenu()) {
+                if (isCasting) {
+                    showNotAvailableDuringCastingBulletin();
+                    return;
+                }
                 menuItem.toggleSubMenu();
             }
         });
@@ -5571,6 +5648,46 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         speedGap = menuItem.addColoredGap();
         speedGap.setColor(0xff181818);
         menuItem.getPopupLayout().setFitItems(true);
+
+        if (fakeCastButton != null) {
+            containerView.removeView(fakeCastButton);
+            fakeCastButton = null;
+        }
+        fakeCastButton = new MediaRouteButton(activityContext);
+        fakeCastButton.setVisibility(View.INVISIBLE);
+//        fakeCastButton.setDialogFactory(new MediaRouteDialogFactory() {
+//            @Override
+//            @NonNull
+//            public MediaRouteChooserDialogFragment onCreateChooserDialogFragment() {
+//                return new MediaRouteChooserDialogFragment() {
+//                    @Override
+//                    public MediaRouteChooserDialog onCreateChooserDialog(
+//                            Context context, Bundle savedInstanceState) {
+//                        return new MediaRouteChooserDialog(context);
+//                    }
+//                };
+//            }
+//
+//            @Override
+//            @NonNull
+//            public MediaRouteControllerDialogFragment onCreateControllerDialogFragment() {
+//                return new MediaRouteControllerDialogFragment() {
+//                    @Override
+//                    public MediaRouteControllerDialog onCreateControllerDialog(
+//                            Context context, Bundle savedInstanceState) {
+//                        return new MediaRouteControllerDialog(context);
+//                    }
+//                };
+//            }
+//        });
+        containerView.addView(fakeCastButton);
+        CastButtonFactory.setUpMediaRouteButton(activityContext, fakeCastButton);
+
+        castItem = menuItem.addSubItem(gallery_menu_cast, R.drawable.ic_cast, getString("Cast", R.string.Cast)).setColors(0xfffafafa, 0xfffafafa);
+        castItem.setContentDescription(getString("Cast", R.string.Cast));
+
+        castGap = menuItem.addColoredGap();
+        castGap.setColor(0xff181818);
 
         menuItem.addSubItem(gallery_menu_openin, R.drawable.msg_openin, getString(R.string.OpenInExternalApp)).setColors(0xfffafafa, 0xfffafafa);
         menuItem.setContentDescription(getString(R.string.AccDescrMoreOptions));
@@ -7039,6 +7156,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
         textSelectionHelper.setParentView(containerView);
         textSelectionHelper.setInvalidateParent();
+    }
+
+    private void showNotAvailableDuringCastingBulletin() {
+        if (containerView == null || parentActivity == null) return;
+        BulletinFactory.of(containerView, resourcesProvider).createSimpleBulletin(parentActivity.getResources().getDrawable(R.drawable.ic_cast), LocaleController.getString(R.string.UnavailableDuringCasting)).show();
     }
 
     private Bulletin limitBulletin;
@@ -9514,6 +9636,57 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                         }
                     });
                 }
+
+                @Override
+                public void onCastPrepare() {
+                    if (castView != null) {
+                        castView.setVisibility(View.VISIBLE);
+                        castViewText.setText(LocaleController.getString(R.string.CastingPreparing));
+                    }
+                    toggleMiniProgress(true, true);
+                    toggleControlsOnCast(true);
+                }
+
+                @Override
+                public void onCastPrepared() {
+                    if (castView != null) {
+                        castView.setVisibility(View.VISIBLE);
+                        castViewText.setText(LocaleController.getString(R.string.CastingPrepared));
+                    }
+                    toggleMiniProgress(false, true);
+                    toggleControlsOnCast(true);
+                }
+
+                @Override
+                public void onCastStarted(@Nullable String castDeviceName) {
+                    if (castView != null) {
+                        castView.setVisibility(View.VISIBLE);
+                        castViewText.setText(castDeviceName != null ? LocaleController.formatString(R.string.CastingTo, castDeviceName): LocaleController.getString(R.string.Casting));
+                    }
+                    toggleControlsOnCast(true);
+                }
+
+                @Override
+                public void onCastStopped() {
+                    if (castView != null) {
+                        castView.setVisibility(View.GONE);
+                    }
+                    toggleMiniProgress(false, true);
+                    toggleControlsOnCast(false);
+                }
+
+                @Override
+                public CastMetadata onCastMetadataRequested() {
+                    MessageObject mo = currentMessageObject;
+                    if (mo == null) {
+                        return null;
+                    }
+                    return new CastMetadata(
+                        mo.getFileName(),
+                        mo.getMimeType(),
+                        mo.getSize()
+                    );
+                }
             });
         }
         if (!imagesArrLocals.isEmpty()) {
@@ -9617,6 +9790,11 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
 
         inPreview = preview;
+    }
+
+    private boolean isCasting = false;
+    private void toggleControlsOnCast(boolean isCast) {
+        isCasting = isCast;
     }
 
     public void checkFullscreenButton() {
@@ -12664,6 +12842,9 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         actionBar.setTranslationY(0);
         dialogPhotos = null;
 
+        menuItem.hideSubItem(gallery_menu_cast);
+        castGap.setVisibility(View.GONE);
+
         checkImageView.setAlpha(1.0f);
         checkImageView.setTranslationY(0.0f);
         checkImageView.setVisibility(View.GONE);
@@ -13247,6 +13428,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     speedItem.setVisibility(View.GONE);
                     qualityItem.setVisibility(View.GONE);
                     speedGap.setVisibility(View.GONE);
+                    menuItem.hideSubItem(gallery_menu_cast);
+                    castGap.setVisibility(View.GONE);
                     menuItem.hideSubItem(gallery_menu_openin);
                     menuItem.checkHideMenuItem();
                     final boolean pipItemVisible = pipItem.getVisibility() == View.VISIBLE;
@@ -13771,7 +13954,16 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 actionBarContainer.setTitle(title);
             }
         }
+        if (!isVideo) {
+            menuItem.hideSubItem(gallery_menu_cast);
+            castGap.setVisibility(View.GONE);
+        } else {
+            menuItem.showSubItem(gallery_menu_cast);
+            castGap.setVisibility(View.VISIBLE);
+        }
         setCurrentCaption(newMessageObject, caption, captionTranslating, animateCaption);
+        castView.setVisibility(View.GONE);
+        toggleControlsOnCast(false);
     }
 
     private void updateCaptionTranslated() {
@@ -14161,9 +14353,16 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                 speedItem.setVisibility(View.VISIBLE);
                 menuItem.showSubItem(gallery_menu_speed);
                 speedGap.setVisibility(menuItem.getVisibleSubItemsCount() > 1 ? View.VISIBLE : View.GONE);
+
+                menuItem.showSubItem(gallery_menu_cast);
+                castGap.setVisibility(menuItem.getVisibleSubItemsCount() > 1 ? View.VISIBLE : View.GONE);
             } else {
                 speedItem.setVisibility(View.GONE);
                 speedGap.setVisibility(View.GONE);
+
+                menuItem.hideSubItem(gallery_menu_cast);
+                castGap.setVisibility(View.GONE);
+
                 menuItem.checkHideMenuItem();
             }
             updateQualityItems();
@@ -18259,6 +18458,10 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                     surfaceBlackoutPaint.setAlpha((int) (255 * (1f - alpha)));
                     canvas.drawRect(-1f, -1f, aspectRatioFrameLayout.getWidth() + 1f, aspectRatioFrameLayout.getHeight() + 1f, surfaceBlackoutPaint);
                 }
+
+//                if (castView != null && castView.getVisibility() == View.VISIBLE) {
+//                    castView.draw(canvas);
+//                }
 
                 if (videoCrossfadeStarted && videoCrossfadeAlpha < 1.0f) {
                     videoCrossfadeAlpha += dt / (playerInjected ? 100.0f : 200.0f);

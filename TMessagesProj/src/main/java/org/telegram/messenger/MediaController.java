@@ -55,6 +55,7 @@ import android.provider.OpenableColumns;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
+import android.util.Log;
 import android.util.Pair;
 import android.util.SparseArray;
 import android.view.HapticFeedbackConstants;
@@ -64,11 +65,15 @@ import android.view.WindowManager;
 import android.webkit.MimeTypeMap;
 import android.widget.FrameLayout;
 
+import androidx.annotation.Nullable;
+
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
 
 import org.telegram.messenger.audioinfo.AudioInfo;
+import org.telegram.messenger.cast.CastMetaDataMusic;
+import org.telegram.messenger.cast.CastMetadata;
 import org.telegram.messenger.video.MediaCodecVideoConvertor;
 import org.telegram.messenger.voip.VoIPService;
 import org.telegram.tgnet.AbstractSerializedData;
@@ -136,6 +141,16 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
 
     public VideoConvertMessage getCurrentForegroundConverMessage() {
         return currentForegroundConvertingVideo;
+    }
+
+    public void requestAudioCasting() {
+        pauseMessage(getPlayingMessageObject());
+    }
+
+    public void stopAudioCasting() {
+        if (audioPlayer != null) {
+            audioPlayer.stopRemoteCasting();
+        }
     }
 
     private static class AudioBuffer {
@@ -3539,6 +3554,43 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     @Override
                     public boolean onSurfaceDestroyed(SurfaceTexture surfaceTexture) {
                         return false;
+                    }
+
+                    @Override
+                    public void onCastPrepare() {
+                        NotificationCenter.getInstance(UserConfig.selectedAccount)
+                                .postNotificationName(NotificationCenter.castStateEvent, "prepare");
+                    }
+
+                    @Override
+                    public void onCastPrepared() {
+                        NotificationCenter.getInstance(UserConfig.selectedAccount)
+                                .postNotificationName(NotificationCenter.castStateEvent, "prepared");
+                    }
+
+                    @Override
+                    public void onCastStarted(@Nullable String castDeviceName) {
+                        NotificationCenter.getInstance(UserConfig.selectedAccount)
+                                .postNotificationName(NotificationCenter.castStateEvent, "started", castDeviceName);
+                    }
+
+                    @Override
+                    public void onCastStopped() {
+                        NotificationCenter.getInstance(UserConfig.selectedAccount)
+                                .postNotificationName(NotificationCenter.castStateEvent, "stopped");
+                    }
+
+                    @Override
+                    public CastMetadata onCastMetadataRequested() {
+                        MessageObject mo = getPlayingMessageObject();
+                        if (mo == null) return null;
+                        return new CastMetaDataMusic(
+                            mo.getFileName(),
+                            mo.getMimeType(),
+                            mo.getSize(),
+                            mo.getMusicTitle(true),
+                            mo.getMusicAuthor(true)
+                        );
                     }
                 });
                 audioPlayer.setAudioVisualizerDelegate(new VideoPlayer.AudioVisualizerDelegate() {

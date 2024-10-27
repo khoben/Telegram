@@ -8187,4 +8187,12 @@
     <string name="VoipChannelScheduledOfflineAirplane">You currently have airplane mode enabled. Please turn it off or connect to Wi-Fi to enable notification when this stream is started.</string>
     <string name="VoipGroupScheduledOffline">You\'re currently offline. Please connect to the Internet to enable notification when this video chat is started.</string>
     <string name="VoipGroupScheduledOfflineAirplane">You currently have airplane mode enabled. Please turn it off or connect to Wi-Fi to enable notification when this video chat is started.</string>
+    <string name="Cast">Cast</string>
+    <string name="Casting">Casting…</string>
+    <string name="CastingPreparing">Casting preparing…</string>
+    <string name="CastingPrepared">Casting prepared…</string>
+    <string name="CastingTo">Casting to %1$s</string>
+    <string name="UnavailableDuringCasting">Unavailable during casting</string>
+    <string name="CastAndroidServiceName">Telegram Cast Service</string>
+    <string name="CastAndroidServiceRunning">Cast service running</string>
 </resources>
