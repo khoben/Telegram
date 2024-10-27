@@ -525,7 +525,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
                 audioPlayer.setPlayWhenReady(autoplay);
             }
         }
-        if (castPlayer == null) {
+        if (castPlayer == null && Looper.myLooper() == Looper.getMainLooper()) {
             CastContextHolder.context.removeCastStateListener(this);
             CastContextHolder.context.addCastStateListener(this);
             castPlayer = new CastPlayer(CastContextHolder.context);
@@ -1261,11 +1261,11 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             audioPlayer = null;
         }
         if (castPlayer != null) {
+            CastContextHolder.context.removeCastStateListener(this);
             castPlayer.setSessionAvailabilityListener(null);
             castPlayer.release();
             castPlayer = null;
         }
-        CastContextHolder.context.removeCastStateListener(this);
         if (shouldPauseOther) {
             NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.playerDidStartPlaying);
         }
