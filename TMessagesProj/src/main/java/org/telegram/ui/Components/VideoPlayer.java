@@ -97,6 +97,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.cast.CastContextHolder;
+import org.telegram.messenger.cast.CastHttpShareService;
 import org.telegram.messenger.cast.CastItem;
 import org.telegram.messenger.cast.CastMetaDataMusic;
 import org.telegram.messenger.cast.CastMetadata;
@@ -117,6 +118,11 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @SuppressLint("NewApi")
 public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsListener, NotificationCenter.NotificationCenterDelegate, SessionAvailabilityListener, CastStateListener {
@@ -307,9 +313,44 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
         }
     }
 
+    private final AtomicInteger waitForCastServiceTries = new AtomicInteger(0);
+    private ScheduledExecutorService waitForCastService = null;
+    private Future<?> waitForCastServiceFuture = null;
+
     @Override
     public void onCastSessionAvailable() {
-        startCast();
+        CastHttpShareService.startService();
+        if (CastHttpShareService.isStarted()) {
+            startCast();
+        } else {
+            if (waitForCastService == null || waitForCastService.isShutdown()) {
+                waitForCastService = Executors.newSingleThreadScheduledExecutor();
+            }
+            if (waitForCastServiceFuture != null && !waitForCastServiceFuture.isDone()) {
+                waitForCastServiceFuture.cancel(true);
+                waitForCastServiceFuture = null;
+            }
+            waitForCastServiceTries.set(0);
+            waitForCastServiceFuture = waitForCastService.scheduleWithFixedDelay(() -> {
+                if (waitForCastServiceTries.get() > 10) {
+                    waitForCastServiceFuture.cancel(false);
+                    waitForCastServiceFuture = null;
+                    waitForCastService.shutdown();
+                    waitForCastService = null;
+                    AndroidUtilities.runOnUIThread(() -> stopCast(CAST_ABORTED));
+                    return;
+                }
+                if (!CastHttpShareService.isStarted()) {
+                    waitForCastServiceTries.incrementAndGet();
+                    return;
+                }
+                waitForCastServiceFuture.cancel(false);
+                waitForCastServiceFuture = null;
+                waitForCastService.shutdown();
+                waitForCastService = null;
+                AndroidUtilities.runOnUIThread(() -> startCast());
+            }, 50, 100, TimeUnit.MILLISECONDS);
+        }
     }
 
     @Override
@@ -437,8 +478,16 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     private void stopCast(int reason) {
         isPrepareCast = false;
         isCast = false;
+        if (waitForCastServiceFuture != null) {
+            waitForCastServiceFuture.cancel(true);
+            waitForCastServiceFuture = null;
+        }
+        if (waitForCastService != null) {
+            waitForCastService.shutdown();
+            waitForCastService = null;
+        }
         CastShareServer.unregisterAll();
-//        CastHttpShareService.stopService();
+        CastHttpShareService.stopService();
         if (reason == CAST_ABORTED) {
             if (castPlayer != null && player != null) {
                 player.seekTo(castPlayer.getCurrentPosition());
@@ -449,9 +498,11 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             }
         }
         if (castPlayer != null) {
-            castPlayer.stop();
+            try {
+                castPlayer.stop();
+            } catch (Exception ignored) {};
+            CastContextHolder.context.getSessionManager().endCurrentSession(true);
         }
-        CastContextHolder.context.getSessionManager().endCurrentSession(true);
         if (delegate != null) {
             delegate.onCastStopped();
         }
@@ -1261,6 +1312,8 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             audioPlayer = null;
         }
         if (castPlayer != null) {
+            CastShareServer.unregisterAll();
+            CastHttpShareService.stopService();
             CastContextHolder.context.removeCastStateListener(this);
             castPlayer.setSessionAvailabilityListener(null);
             castPlayer.release();
@@ -1349,7 +1402,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     public void play() {
         if (isCast) {
             if (castPlayer != null) {
-                castPlayer.setPlayWhenReady(true);
+                try {
+                    castPlayer.setPlayWhenReady(true);
+                } catch (Exception ignored) {}
             }
             return;
         }
@@ -1376,7 +1431,9 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     public void pause() {
         if (isCast || isPrepareCast) {
             if (castPlayer != null) {
-                castPlayer.setPlayWhenReady(false);
+                try {
+                    castPlayer.setPlayWhenReady(false);
+                } catch (Exception ignored) {}
             }
             return;
         }
@@ -1407,7 +1464,10 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     public void setPlayWhenReady(boolean playWhenReady) {
         if (isCast) {
             if (castPlayer != null) {
-                castPlayer.setPlayWhenReady(playWhenReady);
+                try {
+                    castPlayer.setPlayWhenReady(playWhenReady);
+                } catch (Exception ignored) {
+                }
             }
             return;
         }
@@ -1606,6 +1666,11 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     public void stopRemoteCasting() {
         stopCast(CAST_ABORTED);
+    }
+
+    public void maybeStopRemoteCasting() {
+        if (!isPrepareCast && !isCast) return;
+        stopRemoteCasting();
     }
 
     @Override

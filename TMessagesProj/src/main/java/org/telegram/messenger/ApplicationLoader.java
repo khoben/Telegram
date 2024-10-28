@@ -38,7 +38,6 @@ import com.google.android.gms.common.GooglePlayServicesUtil;
 
 import org.json.JSONObject;
 import org.telegram.messenger.cast.CastContextHolder;
-import org.telegram.messenger.cast.CastHttpShareService;
 import org.telegram.messenger.voip.VideoCapturerDevice;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
@@ -322,8 +321,6 @@ public class ApplicationLoader extends Application {
         ProxyRotationController.init();
 
         CastContextHolder.init(this);
-        // Preload http casting service for simplicity, should be launched by request
-        CastHttpShareService.startService();
     }
 
     public static void startPushService() {

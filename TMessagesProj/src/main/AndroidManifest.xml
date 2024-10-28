@@ -543,7 +543,8 @@ e            <intent-filter>
                 <action android:name="android.telecom.ConnectionService" />
             </intent-filter>
         </service>
-        <service android:name=".cast.CastHttpShareService" />
+        <service android:name=".cast.CastHttpShareService" android:foregroundServiceType="mediaPlayback">
+        </service>
 
 		<receiver android:name=".MusicPlayerReceiver" android:exported="false">
             <intent-filter>

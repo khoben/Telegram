@@ -5,6 +5,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
@@ -36,7 +37,7 @@ public class CastHttpShareService extends Service {
     private String wifiIP = null;
 
     private ExecutorService executorService;
-    private CastShareServer castShareServer;
+    private static CastShareServer castShareServer;
 
     @Override
     public void onCreate() {
@@ -46,8 +47,6 @@ public class CastHttpShareService extends Service {
             NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             notificationManager.createNotificationChannel(channel);
         }
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle(LocaleController.getString(R.string.CastAndroidServiceName)).setContentText(LocaleController.getString(R.string.CastAndroidServiceRunning)).setSmallIcon(R.drawable.ic_cast);
-        startForeground(SERVICE_ID, builder.build());
         executorService = Executors.newSingleThreadExecutor();
     }
 
@@ -56,6 +55,7 @@ public class CastHttpShareService extends Service {
         if (intent != null) {
             if (Objects.equals(intent.getAction(), START)) {
                 executorService.submit(this::start);
+                startForegroundWithNotification();
                 return START_STICKY;
             } else if (Objects.equals(intent.getAction(), STOP)) {
                 executorService.submit(this::stop);
@@ -65,6 +65,19 @@ public class CastHttpShareService extends Service {
             }
         }
         return START_STICKY;
+    }
+
+    private void startForegroundWithNotification() {
+        try {
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID).setContentTitle(LocaleController.getString(R.string.CastAndroidServiceName)).setContentText(LocaleController.getString(R.string.CastAndroidServiceRunning)).setSmallIcon(R.drawable.ic_cast);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(SERVICE_ID, builder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(SERVICE_ID, builder.build());
+            }
+        } catch (Exception e) {
+            FileLog.e("[CastService] startForegroundWithNotification: Unable to display persistent notification", e);
+        }
     }
 
     @Override
@@ -132,5 +145,9 @@ public class CastHttpShareService extends Service {
         Context context = ApplicationLoader.applicationContext;
         if (context == null) return;
         context.startService(new Intent(context, CastHttpShareService.class).setAction(STOP));
+    }
+
+    public static boolean isStarted() {
+        return castShareServer != null && castShareServer.isAlive();
     }
 }

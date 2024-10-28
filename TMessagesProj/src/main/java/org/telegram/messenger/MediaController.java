@@ -149,7 +149,7 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
 
     public void stopAudioCasting() {
         if (audioPlayer != null) {
-            audioPlayer.stopRemoteCasting();
+            audioPlayer.maybeStopRemoteCasting();
         }
     }
 

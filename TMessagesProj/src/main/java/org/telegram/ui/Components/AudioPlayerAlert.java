@@ -1267,7 +1267,7 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         listAdapter.notifyDataSetChanged();
 
         castView = new FrameLayout(containerView.getContext());
-        castView.setBackgroundColor(0x3C000000);
+        castView.setBackgroundColor(0x30000000);
 
         castViewText = new TextView(containerView.getContext());
         castViewText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
@@ -1278,7 +1278,7 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
         castViewText.setEllipsize(TextUtils.TruncateAt.END);
         castViewText.setTextColor(0xffffffff);
         castViewText.setGravity(Gravity.CENTER_HORIZONTAL);
-        castView.addView(castViewText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 8, 0 ,0));
+        castView.addView(castViewText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0 ,0));
 
         castCancelButton = new TextView(containerView.getContext());
         castCancelButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
@@ -1297,7 +1297,7 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
             castView.setVisibility(View.GONE);
             toggleControlsOnCast(false);
         });
-        castView.addView(castCancelButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 36, 0, 0));
+        castView.addView(castCancelButton, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 28, 0, 0));
 
         castView.setVisibility(View.GONE);
         playerLayout.addView(castView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.CENTER));
@@ -1867,14 +1867,14 @@ public class AudioPlayerAlert extends BottomSheet implements NotificationCenter.
                         castViewText.setText(castDeviceName != null ? LocaleController.formatString(R.string.CastingTo, castDeviceName) : LocaleController.getString(R.string.Casting));
                     }
                     toggleControlsOnCast(true);
-                    // Update ui state to playing
-                    playButton.performClick();
+                    MediaController.getInstance().playMessage(MediaController.getInstance().getPlayingMessageObject());
                     break;
                 case "stopped":
                     if (castView != null) {
                         castView.setVisibility(View.GONE);
                     }
                     toggleControlsOnCast(false);
+                    MediaController.getInstance().pauseMessage(MediaController.getInstance().getPlayingMessageObject());
                     break;
             }
         }
