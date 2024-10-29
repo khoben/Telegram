@@ -29,6 +29,7 @@ import android.text.Layout;
 import android.text.SpannableStringBuilder;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import android.util.Log;
 import android.util.SparseIntArray;
 import android.util.StateSet;
 import android.view.HapticFeedbackConstants;

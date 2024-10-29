@@ -319,6 +319,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     @Override
     public void onCastSessionAvailable() {
+        isPrepareCast = false;
         CastHttpShareService.startService();
         if (CastHttpShareService.isStarted()) {
             startCast();
@@ -355,6 +356,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
 
     @Override
     public void onCastSessionUnavailable() {
+        isPrepareCast = false;
         stopCast(CAST_ABORTED);
     }
 
@@ -1296,7 +1298,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public boolean isPlayerPrepared() {
-        if (isCast || isPrepareCast) {
+        if (isCast) {
             return castPlayer != null;
         }
         return player != null;
@@ -1429,7 +1431,7 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
     }
 
     public void pause() {
-        if (isCast || isPrepareCast) {
+        if (isCast) {
             if (castPlayer != null) {
                 try {
                     castPlayer.setPlayWhenReady(false);
