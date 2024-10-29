@@ -243,6 +243,7 @@ import org.telegram.ui.Components.spoilers.SpoilerEffect;
 import org.telegram.ui.Components.voip.CellFlickerDrawable;
 import org.telegram.ui.Components.voip.VoIPHelper;
 import org.telegram.ui.Delegates.ChatActivityMemberRequestsDelegate;
+import org.telegram.ui.QuickShare.QuickShareLayout;
 import org.telegram.ui.Stars.StarReactionsOverlay;
 import org.telegram.ui.Stars.StarsController;
 import org.telegram.ui.Stars.StarsIntroActivity;
@@ -416,6 +417,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
     private FrameLayout reactionsMentiondownButton;
     private CounterView reactionsMentiondownButtonCounter;
     private ImageView reactionsMentiondownButtonImage;
+
+    private QuickShareLayout quickShareLayout;
 
     private TL_stories.TL_premium_boostsStatus boostsStatus;
     private ChannelBoostsController.CanApplyBoost canApplyBoosts;
@@ -4227,6 +4230,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             public boolean onInterceptTouchEvent(MotionEvent e) {
                 textSelectionHelper.checkSelectionCancel(e);
                 if (isFastScrollAnimationRunning()) {
+                    return false;
+                }
+                if (quickShareLayout != null && quickShareLayout.needToIntercept()) {
                     return false;
                 }
                 boolean result = super.onInterceptTouchEvent(e);
@@ -8468,6 +8474,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             searchExpandList.setText(LocaleController.getString(R.string.SearchAsChat), false);
             updateSearchListEmptyView();
         }
+
+        quickShareLayout = new QuickShareLayout(context, this, resourceProvider, currentAccount);
+        quickShareLayout.setVisibility(View.GONE);
+        contentView.addView(quickShareLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         Timer.finish(t);
 
@@ -15757,6 +15767,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
                     if (factCheckHint != null) {
                         factCheckHint.hide();
                     }
+                    if (quickShareLayout != null) {
+                        quickShareLayout.hide();
+                    }
                 }
 
                 @Override
@@ -16037,6 +16050,13 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
         @Override
         public boolean dispatchTouchEvent(MotionEvent ev) {
+            if (quickShareLayout != null && quickShareLayout.needToIntercept()) {
+                ev.offsetLocation(-quickShareLayout.getX(), -quickShareLayout.getY());
+                quickShareLayout.onTouchEvent(ev);
+
+                return true;
+            }
+
             float expandY;
             if (AndroidUtilities.isInMultiwindow || isInBubbleMode()) {
                 expandY = chatActivityEnterView.getEmojiView() != null ? chatActivityEnterView.getEmojiView().getY() : chatActivityEnterView.getY();
@@ -23869,6 +23889,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             fallbackFieldPanel();
         }
 
+        if (quickShareLayout != null && quickShareLayout.isAffected(markAsDeletedMessages)) {
+            quickShareLayout.hide();
+        }
+
         boolean updated = false;
         LongSparseArray<MessageObject.GroupedMessages> newGroups = null;
         LongSparseArray<Integer> newGroupsSizes = null;
@@ -24908,6 +24932,14 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
             startBotHint.hide();
             startBotHint = null;
         }
+    }
+
+    public void showQuickShareForwarded(long did) {
+        createUndoView();
+        if (undoView == null) {
+            return;
+        }
+        undoView.showWithAction(did, UndoView.ACTION_FWD_MESSAGES, 1, null, null, null);
     }
 
     public boolean groupEmojiPackHintWasVisible() {
@@ -31546,6 +31578,9 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         } else if (scrimPopupWindow != null) {
             closeMenu();
             return false;
+        } else if(quickShareLayout != null && quickShareLayout.isShowing()) {
+            quickShareLayout.hide();
+            return false;
         } else if (checkRecordLocked(false)) {
             return false;
         } else if (textSelectionHelper.isInSelectionMode()) {
@@ -33346,7 +33381,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         if (chatMode == MODE_QUICK_REPLIES && (messages.isEmpty() || threadMessageId == 0)) {
             return false;
         }
-        return swipeBackEnabled && chatActivityEnterView.swipeToBackEnabled() && pullingDownOffset == 0;
+        return swipeBackEnabled && chatActivityEnterView.swipeToBackEnabled() && pullingDownOffset == 0
+                && (quickShareLayout == null || !quickShareLayout.needToIntercept());
     }
 
     @Override
@@ -33354,7 +33390,8 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
         if (chatMode == MODE_QUICK_REPLIES && (messages.isEmpty() || threadMessageId == 0)) {
             return false;
         }
-        return swipeBackEnabled && (forwardingPreviewView == null || !forwardingPreviewView.isShowing());
+        return swipeBackEnabled && (forwardingPreviewView == null || !forwardingPreviewView.isShowing())
+                && (quickShareLayout == null || !quickShareLayout.needToIntercept());
     }
 
     public class ChatActivityAdapter extends RecyclerAnimationScrollHelper.AnimatableAdapter {
@@ -36231,6 +36268,10 @@ public class ChatActivity extends BaseFragment implements NotificationCenter.Not
 
         @Override
         public void didLongPress(ChatMessageCell cell, float x, float y) {
+            if (cell.getMessageObject().isSent() && cell.isInForwardButton(x, y)) {
+                quickShareLayout.showFor(cell);
+                return;
+            }
             createMenu(cell, false, false, x, y, false);
             startMultiselect(chatListView.getChildAdapterPosition(cell));
         }

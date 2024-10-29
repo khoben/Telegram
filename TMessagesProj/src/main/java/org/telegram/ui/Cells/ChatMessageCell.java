@@ -466,6 +466,24 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         }
     }
 
+    public boolean isInForwardButton(float x, float y) {
+        if (sideButtonVisible && drawSideButton == 1 &&
+                x >= sideStartX - dp(24) && x <= sideStartX + dp(40) &&
+                y >= sideStartY - dp(24) && y <= sideStartY + dp(38)
+        ) {
+            return true;
+        }
+        return false;
+    }
+
+    public float getSideButtonX() {
+        return sideStartX;
+    }
+
+    public float getSideButtonY() {
+        return sideStartY;
+    }
+
     public interface ChatMessageCellDelegate {
         default boolean isReplyOrSelf() {
             return false;
